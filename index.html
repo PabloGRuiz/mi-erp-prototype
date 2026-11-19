@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ERP - Gestión de Inventario</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+
+<body>
+
+    <header>
+        <div class="header-inner">
+            <h1>ERP - Gestión de Inventario</h1>
+            <p class="header-subtitle">Módulo de Inventario · Etapa 1</p>
+        </div>
+    </header>
+
+    <main>
+        <section aria-labelledby="kpi-heading">
+            <h2 id="kpi-heading">Resumen ejecutivo</h2>
+            <dl class="kpi-grid">
+                <div class="kpi-card">
+                    <dt>SKUs activos</dt>
+                    <dd id="kpi-total-skus">0</dd>
+                </div>
+                <div class="kpi-card">
+                    <dt>Unidades totales</dt>
+                    <dd id="kpi-total-units">0</dd>
+                </div>
+                <div class="kpi-card" id="kpi-low-stock-card">
+                    <dt>Stock crítico</dt>
+                    <dd id="kpi-low-stock">0</dd>
+                </div>
+                <div class="kpi-card">
+                    <dt>Capital inmovilizado</dt>
+                    <dd id="kpi-total-value">$ 0,00</dd>
+                </div>
+            </dl>
+        </section>
+
+        <section aria-labelledby="form-heading">
+            <h2 id="form-heading">Alta de producto</h2>
+            <p id="error-msg" role="alert"></p>
+            <p id="status-msg" role="status" aria-live="polite"></p>
+
+            <form id="product-form" novalidate>
+                <div>
+                    <label for="product-sku">SKU:</label>
+                    <input type="text" id="product-sku" name="product_sku" placeholder="Ej. TEC-001"
+                        maxlength="32" autocomplete="off" required>
+                </div>
+
+                <div>
+                    <label for="product-name">Producto:</label>
+                    <input type="text" id="product-name" name="product_name" placeholder="Ej. Teclado Mecánico"
+                        maxlength="120" required>
+                </div>
+
+                <div>
+                    <label for="product-category">Categoría:</label>
+                    <input type="text" id="product-category" name="product_category" list="category-suggestions"
+                        placeholder="Ej. Periféricos" maxlength="60">
+                    <datalist id="category-suggestions"></datalist>
+                </div>
+
+                <div>
+                    <label for="product-unit-price">Precio unitario:</label>
+                    <input type="number" id="product-unit-price" name="product_unit_price" placeholder="0.00"
+                        step="0.01" min="0" required>
+                </div>
+
+                <div>
+                    <label for="product-stock">Stock actual:</label>
+                    <input type="number" id="product-stock" name="product_stock" placeholder="0" min="0" step="1"
+                        required>
+                </div>
+
+                <div>
+                    <label for="product-min-stock">Stock mínimo:</label>
+                    <input type="number" id="product-min-stock" name="product_min_stock" value="5" min="0" step="1"
+                        required>
+                </div>
+
+                <div class="form-actions">
+                    <button type="submit" id="submit-btn">Agregar producto</button>
+                    <button type="button" id="cancel-edit-btn" class="btn-secondary" hidden>Cancelar edición</button>
+                </div>
+            </form>
+        </section>
+
+        <section aria-labelledby="list-heading">
+            <div class="section-header">
+                <h2 id="list-heading">Listado de inventario</h2>
+                <p id="list-count" class="list-count">Mostrando 0 de 0 productos</p>
+            </div>
+
+            <div class="toolbar" role="search" aria-label="Filtros del inventario">
+                <div class="toolbar-field toolbar-search">
+                    <label for="search-input">Buscar (SKU, nombre o categoría):</label>
+                    <input type="search" id="search-input" name="search_query"
+                        placeholder="Ej. TEC-001 o Teclado">
+                </div>
+
+                <div class="toolbar-field">
+                    <label for="category-filter">Categoría:</label>
+                    <select id="category-filter" name="category_filter">
+                        <option value="all">Todas las categorías</option>
+                    </select>
+                </div>
+
+                <div class="toolbar-field">
+                    <label for="stock-filter">Estado de stock:</label>
+                    <select id="stock-filter" name="stock_filter">
+                        <option value="all">Todos los estados</option>
+                        <option value="low">Stock crítico (bajo / sin stock)</option>
+                        <option value="out">Sin stock</option>
+                        <option value="ok">Stock normal</option>
+                    </select>
+                </div>
+
+                <div class="toolbar-field">
+                    <label for="sort-select">Ordenar por:</label>
+                    <select id="sort-select" name="sort_by">
+                        <option value="createdAt-desc">Más recientes</option>
+                        <option value="name-asc">Nombre (A-Z)</option>
+                        <option value="price-asc">Precio (menor a mayor)</option>
+                        <option value="price-desc">Precio (mayor a menor)</option>
+                        <option value="stock-asc">Stock (menor a mayor)</option>
+                        <option value="stock-desc">Stock (mayor a menor)</option>
+                        <option value="value-desc">Valor total (mayor a menor)</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="table-wrapper">
+                <table>
+                    <thead>
+                        <tr>
+                            <th scope="col">SKU</th>
+                            <th scope="col">Producto</th>
+                            <th scope="col">Categoría</th>
+                            <th scope="col">Precio</th>
+                            <th scope="col">Stock</th>
+                            <th scope="col">Estado</th>
+                            <th scope="col">Valor total</th>
+                            <th scope="col">Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody id="table-body"></tbody>
+                    <tfoot>
+                        <tr>
+                            <th scope="row" colspan="6">Valor total listado:</th>
+                            <td id="inventory-total"></td>
+                            <td aria-hidden="true"></td>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
+        </section>
+    </main>
+
+    <dialog id="confirm-dialog" aria-labelledby="confirm-dialog-title">
+        <h3 id="confirm-dialog-title">Confirmar eliminación</h3>
+        <p id="confirm-dialog-message"></p>
+        <div class="dialog-actions">
+            <button type="button" id="confirm-cancel-btn" class="btn-secondary">Cancelar</button>
+            <button type="button" id="confirm-accept-btn" class="btn-danger">Eliminar producto</button>
+        </div>
+    </dialog>
+
+    <script type="module" src="src/main.js"></script>
+</body>
+
+</html>

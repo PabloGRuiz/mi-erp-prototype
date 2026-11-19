@@ -1,0 +1,12 @@
+{
+  "name": "mi-erp",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Sistema ERP modular en Vanilla HTML5, CSS y ES Modules",
+  "scripts": {
+    "dev": "node dev-server.mjs",
+    "test": "node --test tests/*.test.js"
+  }
+}
+
