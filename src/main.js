@@ -1,26 +1,38 @@
+import { exportMovementsToCsv, exportProductsToCsv } from './domain/csv.js';
+import { validateMovementInput } from './domain/movement.js';
 import {
     calculateInventoryMetrics,
-    createProduct,
     filterAndSortProducts,
     getUniqueCategories,
     validateProductInput
 } from './domain/product.js';
-import { createLocalStorageProductRepository } from './repositories/localStorageProductRepository.js';
+import { createHttpInventoryRepository } from './repositories/httpInventoryRepository.js';
 import { createInventoryView } from './ui/inventoryView.js';
+import { createKardexView, triggerCsvDownload } from './ui/kardexView.js';
 
-const productRepository = createLocalStorageProductRepository();
+const inventoryRepository = createHttpInventoryRepository('/api');
 const view = createInventoryView();
+const kardexView = createKardexView();
 
 const state = {
     products: [],
+    movements: [],
     editingId: null,
     filters: {
         query: '',
         category: 'all',
         stockFilter: 'all',
         sortBy: 'createdAt-desc'
+    },
+    kardexFilters: {
+        productId: '',
+        type: 'all'
     }
 };
+
+function getTodayDateStamp() {
+    return new Date().toISOString().slice(0, 10);
+}
 
 function render() {
     const metrics = calculateInventoryMetrics(state.products);
@@ -30,11 +42,40 @@ function render() {
         state.filters.category = 'all';
     }
 
+    if (
+        state.kardexFilters.productId &&
+        !state.products.some((product) => product.id === state.kardexFilters.productId)
+    ) {
+        state.kardexFilters.productId = '';
+    }
+
     const visibleProducts = filterAndSortProducts(state.products, state.filters);
 
     view.renderMetrics(metrics);
     view.renderCategoryOptions(categories, state.filters.category);
     view.renderTable(visibleProducts, state.products.length, state.editingId);
+
+    kardexView.renderProductSelectors(
+        state.products,
+        kardexView.elements.movementProduct.value,
+        state.kardexFilters.productId
+    );
+    kardexView.renderMovements(state.movements);
+}
+
+async function syncFromServer() {
+    const [products, movements] = await Promise.all([
+        inventoryRepository.getAll(),
+        inventoryRepository.getMovements(state.kardexFilters)
+    ]);
+
+    state.products = products;
+    state.movements = movements;
+}
+
+async function refreshMovementsOnly() {
+    state.movements = await inventoryRepository.getMovements(state.kardexFilters);
+    kardexView.renderMovements(state.movements);
 }
 
 function exitEditMode() {
@@ -60,47 +101,52 @@ async function handleFormSubmit(event) {
 
     try {
         if (state.editingId) {
-            const updated = await productRepository.update(state.editingId, validation.data);
-            state.products = state.products.map((product) =>
-                product.id === updated.id ? updated : product
-            );
+            const updated = await inventoryRepository.update(state.editingId, rawInput);
             state.editingId = null;
             view.setFormMode(null);
-            view.showStatus(`Producto "${updated.name}" (${updated.sku}) actualizado.`);
+            view.showStatus(`Producto "${updated.name}" (${updated.sku}) actualizado en SQLite.`);
         } else {
-            const product = createProduct(validation.data);
-            const saved = await productRepository.create(product);
-            state.products = [saved, ...state.products];
+            const saved = await inventoryRepository.create(rawInput);
             view.setFormMode(null);
             view.showStatus(`Producto "${saved.name}" (${saved.sku}) agregado al inventario.`);
         }
 
+        await syncFromServer();
         render();
         view.focusField('sku');
     } catch (error) {
-        view.showError(error instanceof Error ? error.message : 'No se pudo guardar el producto.');
+        view.showError(
+            error instanceof Error ? error.message : 'No se pudo guardar el producto.',
+            error?.field ?? null
+        );
     }
 }
 
 async function handleQuickStockAdjust(product, delta) {
-    const nextStock = Math.max(0, product.stock + delta);
-    if (nextStock === product.stock) {
+    if (delta < 0 && product.stock === 0) {
         return;
     }
 
     view.clearError();
 
     try {
-        const updated = await productRepository.update(product.id, { stock: nextStock });
-        state.products = state.products.map((item) =>
-            item.id === updated.id ? updated : item
-        );
+        const result = await inventoryRepository.recordMovement({
+            productId: product.id,
+            type: delta > 0 ? 'IN' : 'OUT',
+            quantity: 1,
+            reason: 'Ajuste rápido en listado',
+            reference: ''
+        });
 
-        if (state.editingId === updated.id) {
-            view.elements.stockInput.value = String(updated.stock);
+        await syncFromServer();
+
+        if (state.editingId === result.product.id) {
+            view.elements.stockInput.value = String(result.product.stock);
         }
 
-        view.showStatus(`Stock de "${updated.name}" actualizado a ${updated.stock} unidades.`);
+        view.showStatus(
+            `Stock de "${result.product.name}" actualizado a ${result.product.stock} unidades (registrado en Kardex).`
+        );
         render();
     } catch (error) {
         view.showError(error instanceof Error ? error.message : 'No se pudo actualizar el stock.');
@@ -116,19 +162,20 @@ async function handleDeleteProduct(product) {
     view.clearError();
 
     try {
-        const removed = await productRepository.remove(product.id);
+        const removed = await inventoryRepository.remove(product.id);
         if (!removed) {
             return;
         }
-
-        state.products = state.products.filter((item) => item.id !== product.id);
 
         if (state.editingId === product.id) {
             state.editingId = null;
             view.setFormMode(null);
         }
 
-        view.showStatus(`Producto "${product.name}" (${product.sku}) eliminado del inventario.`);
+        await syncFromServer();
+        view.showStatus(
+            `Producto "${product.name}" (${product.sku}) eliminado del catálogo (historial preservado en Kardex).`
+        );
         render();
     } catch (error) {
         view.showError(error instanceof Error ? error.message : 'No se pudo eliminar el producto.');
@@ -172,13 +219,67 @@ function handleTableClick(event) {
     }
 }
 
+async function handleMovementSubmit(event) {
+    event.preventDefault();
+    kardexView.clearError();
+    kardexView.clearStatus();
+
+    const rawMovement = kardexView.readFormValues();
+    const product = state.products.find((item) => item.id === rawMovement.productId);
+    const validation = validateMovementInput(rawMovement, product);
+
+    if (!validation.ok) {
+        kardexView.showError(validation.error, validation.field);
+        return;
+    }
+
+    try {
+        const result = await inventoryRepository.recordMovement(rawMovement);
+        await syncFromServer();
+        kardexView.resetForm(result.product.id);
+        kardexView.showStatus(
+            `Movimiento registrado para "${result.product.name}": stock actual ${result.product.stock} unidades.`
+        );
+        render();
+    } catch (error) {
+        kardexView.showError(
+            error instanceof Error ? error.message : 'No se pudo registrar el movimiento.',
+            error?.field ?? null
+        );
+    }
+}
+
+function handleExportProductsCsv() {
+    view.clearError();
+    const visibleProducts = filterAndSortProducts(state.products, state.filters);
+    if (visibleProducts.length === 0) {
+        view.showError('No hay productos visibles para exportar a CSV.');
+        return;
+    }
+
+    const csv = exportProductsToCsv(visibleProducts);
+    triggerCsvDownload(`inventario-${getTodayDateStamp()}.csv`, csv);
+    view.showStatus(`Exportado inventario (${visibleProducts.length} productos) a CSV.`);
+}
+
+function handleExportKardexCsv() {
+    kardexView.clearError();
+    if (state.movements.length === 0) {
+        kardexView.showError('No hay movimientos en el Kardex para exportar.');
+        return;
+    }
+
+    const csv = exportMovementsToCsv(state.movements);
+    triggerCsvDownload(`kardex-${getTodayDateStamp()}.csv`, csv);
+    kardexView.showStatus(`Exportado Kardex (${state.movements.length} movimientos) a CSV.`);
+}
+
 function bindEvents() {
     view.elements.form.addEventListener('submit', (event) => {
         void handleFormSubmit(event);
     });
 
     view.elements.cancelEditBtn.addEventListener('click', exitEditMode);
-
     view.elements.tableBody.addEventListener('click', handleTableClick);
 
     view.elements.searchInput.addEventListener('input', (event) => {
@@ -201,6 +302,31 @@ function bindEvents() {
         render();
     });
 
+    kardexView.elements.movementType.addEventListener('change', () => {
+        kardexView.syncMovementTypeUI();
+    });
+
+    kardexView.elements.movementForm.addEventListener('submit', (event) => {
+        void handleMovementSubmit(event);
+    });
+
+    kardexView.elements.kardexProductFilter.addEventListener('change', (event) => {
+        state.kardexFilters.productId = event.target.value;
+        void refreshMovementsOnly().catch((error) => {
+            kardexView.showError(error instanceof Error ? error.message : 'Error al filtrar Kardex.');
+        });
+    });
+
+    kardexView.elements.kardexTypeFilter.addEventListener('change', (event) => {
+        state.kardexFilters.type = event.target.value;
+        void refreshMovementsOnly().catch((error) => {
+            kardexView.showError(error instanceof Error ? error.message : 'Error al filtrar Kardex.');
+        });
+    });
+
+    kardexView.elements.exportProductsCsvBtn.addEventListener('click', handleExportProductsCsv);
+    kardexView.elements.exportKardexCsvBtn.addEventListener('click', handleExportKardexCsv);
+
     document.addEventListener('keydown', (event) => {
         if (event.key === 'Escape' && state.editingId && !view.elements.confirmDialog.open) {
             exitEditMode();
@@ -210,16 +336,20 @@ function bindEvents() {
 
 async function init() {
     bindEvents();
+    view.setFormMode(null);
+    kardexView.syncMovementTypeUI();
 
     try {
-        state.products = await productRepository.getAll();
+        await syncFromServer();
     } catch (error) {
-        view.showError(error instanceof Error ? error.message : 'No se pudo cargar el inventario inicial.');
+        view.showError(
+            error instanceof Error
+                ? error.message
+                : 'No se pudo conectar con el servidor SQLite del ERP.'
+        );
     }
 
-    view.setFormMode(null);
     render();
 }
 
 void init();
-

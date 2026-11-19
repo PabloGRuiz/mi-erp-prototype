@@ -14,6 +14,12 @@ import {
     validateProductInput
 } from '../src/domain/product.js';
 import {
+    calculateMovementSummary,
+    MOVEMENT_TYPES,
+    validateMovementInput
+} from '../src/domain/movement.js';
+import { exportMovementsToCsv, exportProductsToCsv, escapeCsvCell } from '../src/domain/csv.js';
+import {
     createLocalStorageProductRepository,
     STORAGE_KEY
 } from '../src/repositories/localStorageProductRepository.js';
@@ -195,3 +201,106 @@ test('repository: supports async CRUD, defensive cloning, and corrupted JSON rec
     assert.deepEqual(await repo.getAll(), []);
 });
 
+
+test('movement: validates IN, OUT, INSUFFICIENT_STOCK, ADJUSTMENT, and aggregates summary', () => {
+    const product = createProduct(
+        { sku: 'MOU-01', name: 'Mouse Óptico', category: 'Periféricos', priceCents: 150000, stock: 10, minStock: 3 },
+        { id: 'p-1', now: '2026-11-19T10:00:00.000Z' }
+    );
+
+    const validIn = validateMovementInput(
+        { type: 'in', quantity: '4', reason: ' Compra ', reference: ' FC-10 ' },
+        product
+    );
+    assert.equal(validIn.ok, true);
+    assert.deepEqual(validIn.data, {
+        productId: 'p-1',
+        type: MOVEMENT_TYPES.IN,
+        quantity: 4,
+        delta: 4,
+        previousStock: 10,
+        resultingStock: 14,
+        reason: 'Compra',
+        reference: 'FC-10'
+    });
+
+    const insufficient = validateMovementInput(
+        { type: 'OUT', quantity: '11', reason: 'Venta grande' },
+        product
+    );
+    assert.equal(insufficient.ok, false);
+    assert.equal(insufficient.code, 'INSUFFICIENT_STOCK');
+    assert.equal(insufficient.field, 'quantity');
+
+    const adjustment = validateMovementInput(
+        { type: 'ADJUSTMENT', targetStock: '6', reason: 'Conteo físico' },
+        product
+    );
+    assert.equal(adjustment.ok, true);
+    assert.equal(adjustment.data.delta, -4);
+    assert.equal(adjustment.data.quantity, 4);
+    assert.equal(adjustment.data.resultingStock, 6);
+
+    const noChange = validateMovementInput(
+        { type: 'ADJUSTMENT', targetStock: '10', reason: 'Conteo igual' },
+        product
+    );
+    assert.equal(noChange.ok, false);
+    assert.equal(noChange.code, 'NO_CHANGE');
+
+    assert.deepEqual(
+        calculateMovementSummary([{ delta: 10 }, { delta: 4 }, { delta: -3 }, { delta: -2 }]),
+        {
+            totalMovements: 4,
+            totalInUnits: 14,
+            totalOutUnits: 5,
+            netUnits: 9
+        }
+    );
+});
+
+test('csv: neutralizes spreadsheet formula injection and formats RFC 4180 rows with BOM', () => {
+    assert.equal(escapeCsvCell('=A1+B1'), '\'=A1+B1');
+    assert.equal(escapeCsvCell('=SUM(1,2)'), '"\'=SUM(1,2)"');
+    assert.equal(escapeCsvCell('=CMD("calc")'), '"\'=CMD(""calc"")"');
+    assert.equal(escapeCsvCell('+1+1'), '\'+1+1');
+    assert.equal(escapeCsvCell('-1+1'), '\'-1+1');
+    assert.equal(escapeCsvCell('@SUM(A1)'), '\'@SUM(A1)');
+    assert.equal(escapeCsvCell('Monitor "Pro", 24"'), '"Monitor ""Pro"", 24"""');
+
+    const productsCsv = exportProductsToCsv([
+        createProduct(
+            {
+                sku: 'SEC-01',
+                name: '=HYPERLINK("http://evil.example","Click")',
+                category: 'Test, "CSV"',
+                priceCents: 1999,
+                stock: 2,
+                minStock: 1
+            },
+            { id: 'csv-1', now: '2026-11-19T10:00:00.000Z' }
+        )
+    ]);
+
+    assert.ok(productsCsv.startsWith('\uFEFFSKU,Producto,'));
+    assert.ok(productsCsv.includes('"\'=HYPERLINK(""http://evil.example"",""Click"")"'));
+    assert.ok(productsCsv.includes('"Test, ""CSV"""'));
+
+    const movementsCsv = exportMovementsToCsv([
+        {
+            createdAt: '2026-11-19T12:00:00.000Z',
+            productSku: 'SEC-01',
+            productName: 'Producto X',
+            type: 'OUT',
+            delta: -2,
+            previousStock: 5,
+            resultingStock: 3,
+            reason: '+SUM(1,2)',
+            reference: 'REF-1'
+        }
+    ]);
+
+    assert.ok(movementsCsv.startsWith('\uFEFFFecha,SKU,Producto,Tipo,Variación,'));
+    assert.ok(movementsCsv.includes('\'-2'));
+    assert.ok(movementsCsv.includes('"\'+SUM(1,2)"'));
+});

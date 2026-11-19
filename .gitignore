@@ -7,6 +7,7 @@ node_modules/
 !.env.example
 
 # Local databases (SQLite & WAL journal files)
+data/
 *.db
 *.db-shm
 *.db-wal
@@ -17,3 +18,4 @@ node_modules/
 *.log
 .DS_Store
 Thumbs.db
+
