@@ -3,15 +3,19 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import path from 'node:path';
 
+import { createGeminiExtractor } from '../server/ai/geminiExtractor.js';
+import { createAuthStore } from '../server/authStore.js';
 import { createDatabase } from '../server/db.js';
+import { createIntakeStore } from '../server/intakeStore.js';
 import { createInventoryStore } from '../server/inventoryStore.js';
+import { createOperationsStore } from '../server/operationsStore.js';
 import { createAppHandler } from '../server/router.js';
 
 const STATIC_ROOT = path.resolve(import.meta.dirname, '..');
 
-function rawHttpGet(port, rawPath) {
+function rawHttpGet(port, rawPath, headers = {}) {
     return new Promise((resolve, reject) => {
-        const req = http.request({ host: '127.0.0.1', port, path: rawPath, method: 'GET' }, (res) => {
+        const req = http.request({ host: '127.0.0.1', port, path: rawPath, method: 'GET', headers }, (res) => {
             let body = '';
             res.setEncoding('utf8');
             res.on('data', (chunk) => {
@@ -24,10 +28,27 @@ function rawHttpGet(port, rawPath) {
     });
 }
 
+function extractSessionCookie(res) {
+    const rawCookie = res.headers.get('set-cookie');
+    assert.ok(rawCookie, 'Expected Set-Cookie header');
+    return rawCookie.split(';')[0];
+}
+
 async function createTestContext() {
     const db = createDatabase(':memory:');
     const store = createInventoryStore(db);
-    const handler = createAppHandler({ store, staticRoot: STATIC_ROOT });
+    const authStore = createAuthStore(db);
+    const operationsStore = createOperationsStore(db);
+    const intakeStore = createIntakeStore(db, { inventoryStore: store, operationsStore });
+    const aiExtractor = createGeminiExtractor({ apiKey: '' });
+    const handler = createAppHandler({
+        store,
+        authStore,
+        operationsStore,
+        intakeStore,
+        aiExtractor,
+        staticRoot: STATIC_ROOT
+    });
     const server = http.createServer((req, res) => {
         void handler(req, res);
     });
@@ -41,6 +62,19 @@ async function createTestContext() {
         db,
         port,
         baseUrl,
+        async setupAdminCookie() {
+            const res = await fetch(`${baseUrl}/api/auth/setup`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    fullName: 'Admin ERP',
+                    username: 'admin',
+                    password: 'Password123!'
+                })
+            });
+            assert.equal(res.status, 201);
+            return extractSessionCookie(res);
+        },
         async close() {
             await new Promise((resolve) => server.close(resolve));
             db.close();
@@ -48,13 +82,16 @@ async function createTestContext() {
     };
 }
 
-test('api: health check reports sqlite storage', async () => {
+test('api: health check reports sqlite storage and protects API routes without session', async () => {
     const ctx = await createTestContext();
     try {
         const res = await fetch(`${ctx.baseUrl}/api/health`);
         assert.equal(res.status, 200);
         const body = await res.json();
-        assert.deepEqual(body, { ok: true, storage: 'sqlite' });
+        assert.deepEqual(body, { ok: true, storage: 'sqlite', version: 4, aiConfigured: false });
+
+        const unauthRes = await fetch(`${ctx.baseUrl}/api/products`);
+        assert.equal(unauthRes.status, 401);
     } finally {
         await ctx.close();
     }
@@ -63,10 +100,13 @@ test('api: health check reports sqlite storage', async () => {
 test('api: full product CRUD + Kardex movements + ACID rollback + accounting invariant', async () => {
     const ctx = await createTestContext();
     try {
-        // 1. Create product with initial stock -> auto-logs IN movement
+        const cookie = await ctx.setupAdminCookie();
+        const headers = { 'Content-Type': 'application/json', Cookie: cookie };
+
+        // 1. Create product with initial stock -> auto-logs IN movement with actorUsername
         const createRes = await fetch(`${ctx.baseUrl}/api/products`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers,
             body: JSON.stringify({
                 sku: 'tec-001',
                 name: 'Teclado Mecánico',
@@ -83,11 +123,12 @@ test('api: full product CRUD + Kardex movements + ACID rollback + accounting inv
         assert.equal(createdPayload.product.priceCents, 4500050);
         assert.equal(createdPayload.movement.type, 'IN');
         assert.equal(createdPayload.movement.delta, 10);
+        assert.equal(createdPayload.movement.actorUsername, 'admin');
 
         // 2. Duplicate SKU returns 409
         const dupRes = await fetch(`${ctx.baseUrl}/api/products`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers,
             body: JSON.stringify({
                 sku: 'TEC-001',
                 name: 'Duplicado',
@@ -104,7 +145,7 @@ test('api: full product CRUD + Kardex movements + ACID rollback + accounting inv
         // 3. Record IN movement (+5 -> 15)
         const inRes = await fetch(`${ctx.baseUrl}/api/movements`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers,
             body: JSON.stringify({
                 productId,
                 type: 'IN',
@@ -121,7 +162,7 @@ test('api: full product CRUD + Kardex movements + ACID rollback + accounting inv
         // 4. Record OUT movement (-4 -> 11)
         const outRes = await fetch(`${ctx.baseUrl}/api/movements`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers,
             body: JSON.stringify({
                 productId,
                 type: 'OUT',
@@ -138,7 +179,7 @@ test('api: full product CRUD + Kardex movements + ACID rollback + accounting inv
         // 5. Reject OUT movement exceeding available stock (409 + rollback)
         const failOutRes = await fetch(`${ctx.baseUrl}/api/movements`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers,
             body: JSON.stringify({
                 productId,
                 type: 'OUT',
@@ -151,14 +192,16 @@ test('api: full product CRUD + Kardex movements + ACID rollback + accounting inv
         assert.equal(failOutBody.code, 'INSUFFICIENT_STOCK');
 
         // Verify stock remained 11 after rollback
-        const getAfterFail = await fetch(`${ctx.baseUrl}/api/products/${productId}`);
+        const getAfterFail = await fetch(`${ctx.baseUrl}/api/products/${productId}`, {
+            headers: { Cookie: cookie }
+        });
         const productAfterFail = (await getAfterFail.json()).product;
         assert.equal(productAfterFail.stock, 11);
 
         // 6. Record ADJUSTMENT to 8 (-3 -> 8)
         const adjRes = await fetch(`${ctx.baseUrl}/api/movements`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers,
             body: JSON.stringify({
                 productId,
                 type: 'ADJUSTMENT',
@@ -174,7 +217,7 @@ test('api: full product CRUD + Kardex movements + ACID rollback + accounting inv
         // 7. Update product metadata without stock change -> no new movement
         const editMetaRes = await fetch(`${ctx.baseUrl}/api/products/${productId}`, {
             method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
+            headers,
             body: JSON.stringify({
                 sku: 'TEC-001',
                 name: 'Teclado Mecánico RGB',
@@ -189,20 +232,29 @@ test('api: full product CRUD + Kardex movements + ACID rollback + accounting inv
         assert.equal(editMetaBody.movement, null);
 
         // 8. Accounting invariant: sum(delta) === live stock (10 + 5 - 4 - 3 = 8)
-        const movRes = await fetch(`${ctx.baseUrl}/api/movements?productId=${productId}`);
+        const movRes = await fetch(`${ctx.baseUrl}/api/movements?productId=${productId}`, {
+            headers: { Cookie: cookie }
+        });
         const movBody = await movRes.json();
         assert.equal(movBody.movements.length, 4);
         const deltaSum = movBody.movements.reduce((acc, m) => acc + m.delta, 0);
         assert.equal(deltaSum, 8);
 
         // 9. Delete product -> logs final OUT closure movement & preserves Kardex audit history
-        const delRes = await fetch(`${ctx.baseUrl}/api/products/${productId}`, { method: 'DELETE' });
+        const delRes = await fetch(`${ctx.baseUrl}/api/products/${productId}`, {
+            method: 'DELETE',
+            headers: { Cookie: cookie }
+        });
         assert.equal(delRes.status, 200);
 
-        const listRes = await fetch(`${ctx.baseUrl}/api/products`);
+        const listRes = await fetch(`${ctx.baseUrl}/api/products`, {
+            headers: { Cookie: cookie }
+        });
         assert.deepEqual((await listRes.json()).products, []);
 
-        const allMovementsRes = await fetch(`${ctx.baseUrl}/api/movements`);
+        const allMovementsRes = await fetch(`${ctx.baseUrl}/api/movements`, {
+            headers: { Cookie: cookie }
+        });
         const allMovements = (await allMovementsRes.json()).movements;
         assert.equal(allMovements.length, 5);
         assert.equal(allMovements[0].productId, null);
@@ -220,6 +272,7 @@ test('api: static file allowlist protects server, database, package.json, and tr
         const okIndex = await rawHttpGet(ctx.port, '/');
         assert.equal(okIndex.status, 200);
         assert.match(okIndex.headers['content-type'], /text\/html/);
+        assert.equal(okIndex.headers['x-content-type-options'], 'nosniff');
 
         const okCss = await rawHttpGet(ctx.port, '/styles.css');
         assert.equal(okCss.status, 200);
@@ -246,4 +299,3 @@ test('api: static file allowlist protects server, database, package.json, and tr
         await ctx.close();
     }
 });
-

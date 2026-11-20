@@ -18,6 +18,26 @@ import {
     MOVEMENT_TYPES,
     validateMovementInput
 } from '../src/domain/movement.js';
+import {
+    canPerform,
+    ROLES,
+    validateLoginInput,
+    validateUserCreateInput
+} from '../src/domain/auth.js';
+import {
+    calculateOperationsSummary,
+    PURCHASE_STATUS,
+    SALE_STATUS,
+    validatePartyInput,
+    validatePurchaseOrderInput,
+    validateSaleOrderInput
+} from '../src/domain/operations.js';
+import {
+    calculateIntakeQueueStats,
+    INTAKE_STATUS,
+    reconcileExtractedDocument,
+    validateIntakeReviewPayload
+} from '../src/domain/intake.js';
 import { exportMovementsToCsv, exportProductsToCsv, escapeCsvCell } from '../src/domain/csv.js';
 import {
     createLocalStorageProductRepository,
@@ -303,4 +323,207 @@ test('csv: neutralizes spreadsheet formula injection and formats RFC 4180 rows w
     assert.ok(movementsCsv.startsWith('\uFEFFFecha,SKU,Producto,Tipo,Variación,'));
     assert.ok(movementsCsv.includes('\'-2'));
     assert.ok(movementsCsv.includes('"\'+SUM(1,2)"'));
+});
+
+test('auth domain: enforces RBAC permission matrix and validates user/login inputs', () => {
+    assert.equal(canPerform(ROLES.ADMIN, 'users:manage'), true);
+    assert.equal(canPerform(ROLES.ADMIN, 'sales:cancel'), true);
+    assert.equal(canPerform(ROLES.OPERATOR, 'sales:write'), true);
+    assert.equal(canPerform(ROLES.OPERATOR, 'sales:cancel'), false);
+    assert.equal(canPerform(ROLES.OPERATOR, 'inventory:delete'), false);
+    assert.equal(canPerform(ROLES.AUDITOR, 'inventory:read'), true);
+    assert.equal(canPerform(ROLES.AUDITOR, 'inventory:write'), false);
+
+    const invalidUser = validateUserCreateInput({
+        username: 'A',
+        fullName: 'Ok Name',
+        password: 'short',
+        role: 'OPERATOR'
+    });
+    assert.equal(invalidUser.ok, false);
+    assert.equal(invalidUser.field, 'username');
+
+    const validUser = validateUserCreateInput({
+        username: ' J.Perez ',
+        fullName: ' Juan Pérez ',
+        password: 'Password123!',
+        role: 'operator'
+    });
+    assert.equal(validUser.ok, true);
+    assert.deepEqual(validUser.data, {
+        username: 'j.perez',
+        fullName: 'Juan Pérez',
+        password: 'Password123!',
+        role: 'OPERATOR'
+    });
+
+    const loginOk = validateLoginInput({ username: ' Admin ', password: 'secret' });
+    assert.equal(loginOk.ok, true);
+    assert.equal(loginOk.data.username, 'admin');
+});
+
+test('operations domain: validates parties, purchase totals, duplicate-line sale stock check, and summary', () => {
+    assert.equal(validatePartyInput({ name: 'Proveedor 1', email: 'bad-email' }).ok, false);
+    const partyOk = validatePartyInput({ name: 'Proveedor 1', taxId: '30-11111111-1', email: 'v@p.com' });
+    assert.equal(partyOk.ok, true);
+
+    const products = new Map([
+        ['p1', { id: 'p1', sku: 'TEC-01', name: 'Teclado', priceCents: 20000, stock: 5 }],
+        ['p2', { id: 'p2', sku: 'MOU-01', name: 'Mouse', priceCents: 10000, stock: 3 }]
+    ]);
+
+    const purchaseOk = validatePurchaseOrderInput(
+        {
+            supplierId: 'sup-1',
+            receiveNow: false,
+            items: [
+                { productId: 'p1', quantity: '2', unitCost: '120.50' },
+                { productId: 'p2', quantity: '3', unitCost: '50' }
+            ]
+        },
+        products
+    );
+    assert.equal(purchaseOk.ok, true);
+    assert.equal(purchaseOk.data.totalCents, 2 * 12050 + 3 * 5000);
+    assert.equal(purchaseOk.data.receiveNow, false);
+
+    // Duplicate lines summing 4 + 2 = 6 > stock 5 must fail!
+    const saleOverflow = validateSaleOrderInput(
+        {
+            items: [
+                { productId: 'p1', quantity: '4' },
+                { productId: 'p1', quantity: '2' }
+            ]
+        },
+        products
+    );
+    assert.equal(saleOverflow.ok, false);
+    assert.equal(saleOverflow.code, 'INSUFFICIENT_STOCK');
+
+    const saleOk = validateSaleOrderInput(
+        {
+            customerId: '',
+            items: [{ productId: 'p2', quantity: '2' }]
+        },
+        products
+    );
+    assert.equal(saleOk.ok, true);
+    assert.equal(saleOk.data.customerId, null);
+    assert.equal(saleOk.data.totalCents, 20000);
+
+    assert.deepEqual(
+        calculateOperationsSummary(
+            [
+                { status: PURCHASE_STATUS.RECEIVED, totalCents: 1000 },
+                { status: PURCHASE_STATUS.DRAFT, totalCents: 500 }
+            ],
+            [
+                { status: SALE_STATUS.CONFIRMED, totalCents: 2500 },
+                { status: SALE_STATUS.CANCELLED, totalCents: 900 }
+            ]
+        ),
+        {
+            receivedPurchasesCount: 1,
+            draftPurchasesCount: 1,
+            receivedPurchasesTotalCents: 1000,
+            confirmedSalesCount: 1,
+            cancelledSalesCount: 1,
+            confirmedSalesTotalCents: 2500
+        }
+    );
+});
+
+test('intake domain: reconciles catalog parties/items, warns on totals, validates edits, and checks RBAC', () => {
+    assert.equal(canPerform(ROLES.ADMIN, 'intake:approve'), true);
+    assert.equal(canPerform(ROLES.OPERATOR, 'intake:approve'), true);
+    assert.equal(canPerform(ROLES.AUDITOR, 'intake:read'), true);
+    assert.equal(canPerform(ROLES.AUDITOR, 'intake:write'), false);
+    assert.equal(canPerform(ROLES.AUDITOR, 'intake:approve'), false);
+
+    const catalog = {
+        products: [
+            createProduct(
+                { sku: 'TEC-001', name: 'Teclado Mecánico', category: 'Periféricos', priceCents: 3000000, stock: 5, minStock: 2 },
+                { id: 'p-1', now: '2026-11-20T10:00:00Z' }
+            )
+        ],
+        suppliers: [{ id: 'sup-1', name: 'TechMayorista SA', taxId: '30-71122334-9', email: '', phone: '' }],
+        customers: []
+    };
+
+    const reconciled = reconcileExtractedDocument(
+        {
+            documentType: 'PURCHASE',
+            documentNumber: 'FC-A 0001-0001',
+            party: { name: 'Tech Mayorista', taxId: '30711223349' },
+            items: [
+                { sku: 'tec-001', name: 'Teclado', quantity: 2, unitPrice: 15000 },
+                { sku: 'NEW-99', name: 'Cable USB-C', quantity: 3, unitPrice: 2000 }
+            ],
+            declaredTotal: 50000,
+            confidence: 0.65
+        },
+        catalog
+    );
+
+    assert.equal(reconciled.reviewPayload.partyId, 'sup-1');
+    assert.equal(reconciled.reviewPayload.createParty, false);
+    assert.equal(reconciled.reviewPayload.items[0].productId, 'p-1');
+    assert.equal(reconciled.reviewPayload.items[0].createProduct, false);
+    assert.equal(reconciled.reviewPayload.items[1].productId, '');
+    assert.equal(reconciled.reviewPayload.items[1].createProduct, true);
+    assert.ok(reconciled.warnings.some((w) => w.includes('no coincide con un producto existente')));
+    assert.ok(reconciled.warnings.some((w) => w.includes('difiere de la suma')));
+    assert.ok(reconciled.warnings.some((w) => w.includes('Confianza de extracción baja')));
+
+    const dupNewSku = validateIntakeReviewPayload(
+        {
+            ...reconciled.reviewPayload,
+            items: [
+                { productId: '', createProduct: true, sku: 'NEW-99', name: 'A', quantity: 1, unitCost: '10', salePrice: '20' },
+                { productId: '', createProduct: true, sku: 'new-99', name: 'B', quantity: 1, unitCost: '10', salePrice: '20' }
+            ]
+        },
+        catalog
+    );
+    assert.equal(dupNewSku.ok, false);
+    assert.equal(dupNewSku.code, 'DUPLICATE_SKU');
+
+    const validEdit = validateIntakeReviewPayload(reconciled.reviewPayload, catalog);
+    assert.equal(validEdit.ok, true);
+    assert.equal(validEdit.data.totalCents, 2 * 1500000 + 3 * 200000);
+
+    assert.deepEqual(
+        calculateIntakeQueueStats([
+            { status: INTAKE_STATUS.PENDING },
+            { status: INTAKE_STATUS.READY_FOR_REVIEW, duplicateOfId: 'x' },
+            { status: INTAKE_STATUS.APPROVED },
+            { status: INTAKE_STATUS.ERROR }
+        ]),
+        {
+            total: 4,
+            processing: 1,
+            readyForReview: 1,
+            approved: 1,
+            rejected: 0,
+            error: 1,
+            duplicates: 1
+        }
+    );
+
+    // Reconciles Factura A totals cleanly when taxAmount (IVA 21%) explains declaredTotal
+    const facturaA = reconcileExtractedDocument(
+        {
+            documentType: 'PURCHASE',
+            documentNumber: '0011-00045569',
+            party: { name: 'TechMayorista SA', taxId: '30-71122334-9' },
+            items: [{ sku: 'TEC-001', name: 'Teclado Mecánico', quantity: 2, unitPrice: 10000 }],
+            taxAmount: 4200,
+            declaredTotal: 24200,
+            confidence: 0.98
+        },
+        catalog
+    );
+    assert.equal(facturaA.reviewPayload.taxAmountCents, 420000);
+    assert.equal(facturaA.warnings.length, 0);
 });

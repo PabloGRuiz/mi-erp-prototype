@@ -1,9 +1,9 @@
 {
   "name": "mi-erp",
-  "version": "2.0.0",
+  "version": "4.0.0",
   "private": true,
   "type": "module",
-  "description": "Sistema ERP modular en Vanilla HTML5, CSS, ES Modules y SQLite local",
+  "description": "Sistema ERP modular en Vanilla HTML5, CSS, ES Modules, SQLite local e Ingesta IA con Gemini",
   "scripts": {
     "dev": "node server/index.js",
     "start": "node server/index.js",

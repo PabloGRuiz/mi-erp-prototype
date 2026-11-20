@@ -1,50 +1,61 @@
-# ERP - Gestión de Inventario
+# ERP - Gestión Empresarial
 
-Sistema ERP modular construido paso a paso con estándares web nativos (HTML5 semántico, CSS Vanilla y ES Modules), arquitectura en capas, SQLite embebido y cero dependencias externas.
+Sistema ERP modular construido con estándares web nativos (HTML5 semántico, CSS Vanilla y ES Modules), arquitectura en capas, SQLite embebido (`node:sqlite`) y cero dependencias externas.
 
-**Estado actual:** Etapa 2 — Módulo de Inventario persistido en SQLite local (`node:sqlite`) con transacciones ACID, **Kardex inmutable** de movimientos de stock y exportación CSV segura.
+**Estado actual:** Etapa 4 — Módulo de **Ingesta Inteligente de Documentos por Lotes con Gemini API**, **Bandeja de Control Previa (Human-in-the-Loop)** y carga ACID en SQLite, sumado a Autenticación (`scrypt` + sesiones `HttpOnly`), RBAC, Inventario, Compras, Ventas y Kardex.
 
 ## Arquitectura del proyecto
 
-- `index.html` y `styles.css`: Estructura semántica HTML5, KPIs, formulario de productos, filtros, sección de Kardex y modal nativo `<dialog>` en CSS Vanilla puro.
-- `src/domain/`: Lógica de negocio pura compartida entre frontend y backend (sin dependencias del DOM).
-  - `money.js`: Aritmética monetaria en centavos enteros y formateo con `Intl.NumberFormat`.
-  - `product.js`: Validaciones (SKU único, montos, enteros), estados de stock, métricas KPI, filtros y ordenamiento inmutable.
-  - `movement.js`: Reglas de validación y transiciones de stock (`IN`, `OUT`, `ADJUSTMENT`) para el Kardex.
-  - `csv.js`: Generación de CSV UTF-8 BOM con protección contra *CSV Formula Injection*.
-- `src/repositories/`: Adaptadores del Patrón Repositorio asíncrono.
-  - `httpInventoryRepository.js`: Adaptador activo contra la API REST (`/api/products` y `/api/movements`).
-  - `localStorageProductRepository.js`: Adaptador local de la Etapa 1 conservado para referencia y pruebas.
-- `src/ui/`: Renderizado seguro del DOM (cero `innerHTML`, prevención de XSS vía `createElement`, `textContent`, `DocumentFragment` y `replaceChildren`).
-  - `inventoryView.js`: Vista de inventario, KPIs y `<dialog>` de confirmación.
-  - `kardexView.js`: Vista del libro Kardex, formulario de movimientos y descarga CSV.
-- `src/main.js`: Punto de composición, estado y *Event Delegation*.
-- `server/`: Backend local en Node.js puro (cero dependencias).
-  - `db.js`: Conexión SQLite (`WAL`, `foreign_keys = ON`), esquema relacional y helper transaccional ACID.
-  - `inventoryStore.js`: Operaciones transaccionales de catálogo y Kardex.
-  - `router.js`: API REST JSON y servidor de estáticos por *allowlist* segura.
-  - `index.js`: Arranque HTTP + SQLite (`data/erp.db`) con apagado limpio.
-- `tests/`: Suite automatizada con `node:test` (`domain.test.js` y `api.test.js`).
+- `index.html` y `styles.css`: Interfaz modular por pestañas (`Inventario`, `Compras`, `Ventas`, `Ingesta IA`, `Kardex`, `Usuarios`) y `<dialog>` nativo.
+- `src/domain/`: Lógica de negocio pura compartida entre frontend y backend.
+  - `money.js`: Aritmética monetaria en centavos enteros y formateo `Intl.NumberFormat`.
+  - `product.js`: Validaciones de catálogo, estados de stock, KPIs, filtros y ordenamiento.
+  - `movement.js`: Reglas de transición del Kardex (`IN`, `OUT`, `ADJUSTMENT`).
+  - `auth.js`: Matriz RBAC (`ADMIN`, `OPERATOR`, `AUDITOR`) y validaciones de usuarios/credenciales.
+  - `operations.js`: Reglas de proveedores, clientes, órdenes de compra multi-ítem y ventas con snapshot de precio y validación agregada de stock.
+  - `intake.js`: Reconciliación determinista contra catálogo, detección de inconsistencias, validación de revisión humana y estadísticas de bandeja.
+  - `csv.js`: Exportación CSV UTF-8 BOM protegida contra *CSV Formula Injection*.
+- `src/repositories/`: Adaptadores del Patrón Repositorio asíncrono (`httpClient.js`, `httpAuthRepository.js`, `httpInventoryRepository.js`, `httpOperationsRepository.js`, `httpIntakeRepository.js`).
+- `src/ui/`: Capas de vista XSS-safe (`createElement`, `textContent`, `DocumentFragment`, `replaceChildren`).
+- `server/`: Backend local en Node.js puro:
+  - `env.js`: Cargador de `.env` sin dependencias externas.
+  - `db.js`: Conexión SQLite (`WAL`, `foreign_keys = ON`) y migraciones versionadas (`PRAGMA user_version = 3`) con soporte de `SAVEPOINT` para transacciones compuestas.
+  - `ai/geminiExtractor.js`: Adaptador multimodal de Google Gemini (`x-goog-api-key` en servidor, `responseSchema` JSON, autodescubrimiento vía `ListModels` y rotación automática ante cuota/demanda/modelos retirados).
+  - `auth.js` / `authStore.js`, `inventoryStore.js`, `operationsStore.js`, `intakeStore.js`: Persistencia transaccional ACID, detección de duplicados por SHA-256 y aprobación atómica de lotes.
+  - `router.js` y `index.js`: API REST protegida por sesión y RBAC + servidor de estáticos por *allowlist*.
+- `tests/`: Suite automatizada con `node:test` (`domain.test.js`, `api.test.js`, `etapa3.test.js`, `etapa4.test.js`).
+
+## Configuración de Gemini API (Ingesta IA)
+
+Copiá `.env.example` a `.env` dentro de `mi-erp/` y cargá tu clave de Google AI Studio:
+
+```env
+PORT=3000
+GEMINI_API_KEY=tu_clave_de_gemini_aqui
+GEMINI_MODEL=gemini-3.8-flash
+GEMINI_AUTO_DISCOVER=true
+```
+
+*(El archivo `.env` está ignorado en `.gitignore` y la clave nunca se expone al navegador. El detector automático consulta `ListModels` sin consumir cuota de generación y rota automáticamente ante cuota agotada, picos de demanda o modelos retirados).*
 
 ## Endpoints de la API REST
 
 - `GET /api/health`
-- `GET /api/products`, `GET /api/products/:id`, `POST /api/products`, `PUT /api/products/:id`, `DELETE /api/products/:id`
-- `GET /api/movements?productId=&type=&limit=`, `POST /api/movements`
+- `GET /api/auth/status`, `POST /api/auth/setup`, `POST /api/auth/login`, `POST /api/auth/logout`
+- `GET/POST /api/products`, `GET/PUT/DELETE /api/products/:id`, `GET/POST /api/movements`
+- `GET/POST /api/suppliers`, `PUT /api/suppliers/:id`, `GET/POST /api/purchases`, `POST /api/purchases/:id/receive`, `POST /api/purchases/:id/cancel`
+- `GET/POST /api/customers`, `PUT /api/customers/:id`, `GET/POST /api/sales`, `POST /api/sales/:id/cancel`
+- `GET /api/ai/status`, `POST /api/ai/refresh`, `GET /api/intake`, `POST /api/intake/upload`, `GET/PUT /api/intake/:id`, `POST /api/intake/:id/approve`, `POST /api/intake/approve-batch`, `POST /api/intake/reject-errors`, `POST /api/intake/:id/reject`
+- `GET/POST /api/users`, `PUT /api/users/:id` (solo `ADMIN`)
 
 ## Cómo ejecutarlo localmente
 
-Requisitos: Node.js 24+ (incluye `node:sqlite` y `node:test` nativos, sin instalar paquetes).
+Requisitos: Node.js 24+ (incluye `node:sqlite` y `node:test` nativos, sin instalar dependencias).
 
 ```powershell
 # Iniciar servidor HTTP + SQLite local en http://localhost:3000
 npm run dev
 
-# Ejecutar pruebas unitarias y de integración API/SQLite
+# Ejecutar toda la suite de pruebas
 npm test
 ```
-
-## Próximos pasos planificados
-
-1. **Etapa 3:** Módulos conectados (Compras a proveedores / Ventas y facturación), autenticación y roles (RBAC).
-2. **Etapa 4:** Capa de IA aplicada detrás de proxy backend seguro (copiloto analítico sobre el Kardex y sugerencias de reposición).

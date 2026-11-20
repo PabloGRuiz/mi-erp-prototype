@@ -42,6 +42,8 @@ function createActionButton({ label, action, productId, className, ariaLabel, di
  * @param {Document} [doc=document]
  */
 export function createInventoryView(doc = document) {
+    let permissions = { canWrite: true, canDelete: true };
+
     const elements = {
         kpiTotalSkus: doc.getElementById('kpi-total-skus'),
         kpiTotalUnits: doc.getElementById('kpi-total-units'),
@@ -49,6 +51,7 @@ export function createInventoryView(doc = document) {
         kpiLowStock: doc.getElementById('kpi-low-stock'),
         kpiTotalValue: doc.getElementById('kpi-total-value'),
 
+        productFormSection: doc.getElementById('product-form-section'),
         formHeading: doc.getElementById('form-heading'),
         errorMsg: doc.getElementById('error-msg'),
         statusMsg: doc.getElementById('status-msg'),
@@ -72,6 +75,7 @@ export function createInventoryView(doc = document) {
         inventoryTotal: doc.getElementById('inventory-total'),
 
         confirmDialog: doc.getElementById('confirm-dialog'),
+        confirmDialogTitle: doc.getElementById('confirm-dialog-title'),
         confirmDialogMessage: doc.getElementById('confirm-dialog-message'),
         confirmCancelBtn: doc.getElementById('confirm-cancel-btn'),
         confirmAcceptBtn: doc.getElementById('confirm-accept-btn')
@@ -112,7 +116,7 @@ export function createInventoryView(doc = document) {
             productId: product.id,
             className: 'stepper-btn',
             ariaLabel: `Restar 1 unidad a ${product.name}`,
-            disabled: product.stock === 0
+            disabled: !permissions.canWrite || product.stock === 0
         });
 
         const stockValue = doc.createElement('span');
@@ -124,7 +128,8 @@ export function createInventoryView(doc = document) {
             action: 'increment',
             productId: product.id,
             className: 'stepper-btn',
-            ariaLabel: `Sumar 1 unidad a ${product.name}`
+            ariaLabel: `Sumar 1 unidad a ${product.name}`,
+            disabled: !permissions.canWrite
         });
 
         stepper.append(decrementBtn, stockValue, incrementBtn);
@@ -148,24 +153,36 @@ export function createInventoryView(doc = document) {
         const actionsGroup = doc.createElement('div');
         actionsGroup.className = 'row-actions';
 
-        const editBtn = createActionButton({
-            label: 'Editar',
-            action: 'edit',
-            productId: product.id,
-            className: 'action-btn action-edit',
-            ariaLabel: `Editar ${product.name}`
-        });
+        if (permissions.canWrite) {
+            const editBtn = createActionButton({
+                label: 'Editar',
+                action: 'edit',
+                productId: product.id,
+                className: 'action-btn action-edit',
+                ariaLabel: `Editar ${product.name}`
+            });
+            actionsGroup.appendChild(editBtn);
+        }
 
-        const deleteBtn = createActionButton({
-            label: 'Eliminar',
-            action: 'delete',
-            productId: product.id,
-            className: 'action-btn action-delete',
-            ariaLabel: `Eliminar ${product.name}`
-        });
+        if (permissions.canDelete) {
+            const deleteBtn = createActionButton({
+                label: 'Eliminar',
+                action: 'delete',
+                productId: product.id,
+                className: 'action-btn action-delete',
+                ariaLabel: `Eliminar ${product.name}`
+            });
+            actionsGroup.appendChild(deleteBtn);
+        }
 
-        actionsGroup.append(editBtn, deleteBtn);
-        actionsCell.appendChild(actionsGroup);
+        if (actionsGroup.childElementCount === 0) {
+            const readOnlyLabel = doc.createElement('span');
+            readOnlyLabel.className = 'cell-muted';
+            readOnlyLabel.textContent = 'Solo lectura';
+            actionsCell.appendChild(readOnlyLabel);
+        } else {
+            actionsCell.appendChild(actionsGroup);
+        }
 
         row.append(
             skuCell,
@@ -196,6 +213,13 @@ export function createInventoryView(doc = document) {
 
     return {
         elements,
+
+        applyPermissions(nextPermissions) {
+            permissions = { ...nextPermissions };
+            if (elements.productFormSection) {
+                elements.productFormSection.hidden = !permissions.canWrite;
+            }
+        },
 
         renderMetrics(metrics) {
             elements.kpiTotalSkus.textContent = formatInteger(metrics.totalProducts);
@@ -330,15 +354,22 @@ export function createInventoryView(doc = document) {
             elements.statusMsg.textContent = '';
         },
 
-        confirmDelete(product) {
-            const message = `¿Seguro que querés eliminar "${product.name}" (SKU: ${product.sku}) del inventario? Esta acción no se puede deshacer.`;
+        confirmAction({
+            title = 'Confirmar acción',
+            message,
+            confirmLabel = 'Confirmar'
+        }) {
             const dialog = elements.confirmDialog;
 
             if (!dialog || typeof dialog.showModal !== 'function') {
                 return Promise.resolve(globalThis.confirm ? globalThis.confirm(message) : false);
             }
 
+            if (elements.confirmDialogTitle) {
+                elements.confirmDialogTitle.textContent = title;
+            }
             elements.confirmDialogMessage.textContent = message;
+            elements.confirmAcceptBtn.textContent = confirmLabel;
             dialog.returnValue = '';
 
             return new Promise((resolve) => {
@@ -367,6 +398,14 @@ export function createInventoryView(doc = document) {
                 dialog.addEventListener('close', handleClose);
                 dialog.showModal();
                 elements.confirmCancelBtn.focus();
+            });
+        },
+
+        confirmDelete(product) {
+            return this.confirmAction({
+                title: 'Confirmar eliminación',
+                message: `¿Seguro que querés eliminar "${product.name}" (SKU: ${product.sku}) del inventario? Esta acción no se puede deshacer.`,
+                confirmLabel: 'Eliminar producto'
             });
         }
     };

@@ -18,6 +18,18 @@ export class DomainError extends Error {
     }
 }
 
+const SYSTEM_ACTOR = Object.freeze({ id: null, username: 'sistema' });
+
+function normalizeActor(actor) {
+    if (!actor || typeof actor !== 'object') {
+        return SYSTEM_ACTOR;
+    }
+    return {
+        id: typeof actor.id === 'string' && actor.id ? actor.id : null,
+        username: typeof actor.username === 'string' && actor.username ? actor.username : 'sistema'
+    };
+}
+
 function mapProductRow(row) {
     return {
         id: row.id,
@@ -46,6 +58,8 @@ function mapMovementRow(row) {
         reason: row.reason,
         reference: row.reference,
         unitPriceCents: row.unit_price_cents,
+        userId: row.user_id ?? null,
+        actorUsername: row.actor_username ?? 'sistema',
         createdAt: row.created_at
     };
 }
@@ -75,8 +89,9 @@ export function createInventoryStore(db) {
     const insertMovementStmt = db.prepare(
         `INSERT INTO stock_movements (
             id, product_id, product_sku, product_name, type, quantity, delta,
-            previous_stock, resulting_stock, reason, reference, unit_price_cents, created_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+            previous_stock, resulting_stock, reason, reference, unit_price_cents,
+            user_id, actor_username, created_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     );
 
     function listProducts() {
@@ -100,8 +115,10 @@ export function createInventoryStore(db) {
         reason,
         reference = '',
         unitPriceCents,
+        actor = SYSTEM_ACTOR,
         createdAt = new Date().toISOString()
     }) {
+        const safeActor = normalizeActor(actor);
         const movement = {
             id: crypto.randomUUID(),
             productId,
@@ -115,6 +132,8 @@ export function createInventoryStore(db) {
             reason,
             reference,
             unitPriceCents,
+            userId: safeActor.id,
+            actorUsername: safeActor.username,
             createdAt
         };
 
@@ -131,6 +150,8 @@ export function createInventoryStore(db) {
             movement.reason,
             movement.reference,
             movement.unitPriceCents,
+            movement.userId,
+            movement.actorUsername,
             movement.createdAt
         );
 
@@ -151,7 +172,7 @@ export function createInventoryStore(db) {
         listProducts,
         getProductById,
 
-        createProduct(rawInput) {
+        createProduct(rawInput, actor = SYSTEM_ACTOR) {
             return runInTransaction(db, () => {
                 const existingProducts = listProducts();
                 const validation = validateProductInput(rawInput, existingProducts, null);
@@ -189,6 +210,7 @@ export function createInventoryStore(db) {
                         reason: 'Stock inicial de alta',
                         reference: '',
                         unitPriceCents: product.priceCents,
+                        actor,
                         createdAt: now
                     });
                 }
@@ -197,7 +219,7 @@ export function createInventoryStore(db) {
             });
         },
 
-        updateProduct(id, rawInput) {
+        updateProduct(id, rawInput, actor = SYSTEM_ACTOR) {
             return runInTransaction(db, () => {
                 const existing = getProductById(id);
                 if (!existing) {
@@ -255,6 +277,7 @@ export function createInventoryStore(db) {
                         reason: 'Ajuste desde edición de producto',
                         reference: '',
                         unitPriceCents: data.priceCents,
+                        actor,
                         createdAt: now
                     });
                 }
@@ -271,7 +294,7 @@ export function createInventoryStore(db) {
             });
         },
 
-        deleteProduct(id) {
+        deleteProduct(id, actor = SYSTEM_ACTOR) {
             return runInTransaction(db, () => {
                 const existing = getProductById(id);
                 if (!existing) {
@@ -293,7 +316,8 @@ export function createInventoryStore(db) {
                         resultingStock: 0,
                         reason: 'Baja de producto del catálogo',
                         reference: '',
-                        unitPriceCents: existing.priceCents
+                        unitPriceCents: existing.priceCents,
+                        actor
                     });
                 }
 
@@ -330,7 +354,7 @@ export function createInventoryStore(db) {
             return db.prepare(sql).all(...params).map(mapMovementRow);
         },
 
-        recordMovement(rawInput) {
+        recordMovement(rawInput, actor = SYSTEM_ACTOR) {
             return runInTransaction(db, () => {
                 const productId = typeof rawInput?.productId === 'string' ? rawInput.productId.trim() : '';
                 const product = productId ? getProductById(productId) : null;
@@ -369,6 +393,7 @@ export function createInventoryStore(db) {
                     reason: data.reason,
                     reference: data.reference,
                     unitPriceCents: product.priceCents,
+                    actor,
                     createdAt: now
                 });
 
@@ -384,4 +409,3 @@ export function createInventoryStore(db) {
         }
     };
 }
-

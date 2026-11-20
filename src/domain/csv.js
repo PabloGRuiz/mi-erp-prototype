@@ -84,7 +84,8 @@ export function exportMovementsToCsv(movements) {
         'Stock Anterior',
         'Stock Resultante',
         'Motivo',
-        'Referencia'
+        'Referencia',
+        'Usuario'
     ];
 
     const rows = movements.map((movement) => [
@@ -96,7 +97,8 @@ export function exportMovementsToCsv(movements) {
         movement.previousStock,
         movement.resultingStock,
         movement.reason,
-        movement.reference ?? ''
+        movement.reference ?? '',
+        movement.actorUsername || 'sistema'
     ]);
 
     return buildCsvDocument(headers, rows);

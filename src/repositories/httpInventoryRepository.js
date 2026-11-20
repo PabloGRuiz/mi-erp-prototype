@@ -1,32 +1,12 @@
+import { createHttpClient } from './httpClient.js';
+
 /**
  * Async Repository adapter backed by the local Node.js + SQLite REST API.
- * Implements the same product CRUD contract as the localStorage adapter plus Kardex movements.
+ * Implements the product CRUD contract plus Kardex movement methods.
  * @param {string} [baseUrl='/api']
  */
 export function createHttpInventoryRepository(baseUrl = '/api') {
-    const normalizedBase = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl;
-
-    async function request(path, options = {}) {
-        const response = await fetch(`${normalizedBase}${path}`, {
-            ...options,
-            headers: {
-                'Content-Type': 'application/json',
-                ...(options.headers ?? {})
-            }
-        });
-
-        const payload = await response.json().catch(() => null);
-
-        if (!response.ok) {
-            const error = new Error(payload?.error || `Error del servidor (HTTP ${response.status}).`);
-            error.status = response.status;
-            error.field = payload?.field ?? null;
-            error.code = payload?.code ?? 'HTTP_ERROR';
-            throw error;
-        }
-
-        return payload;
-    }
+    const request = createHttpClient(baseUrl);
 
     return {
         async getAll() {
@@ -101,4 +81,3 @@ export function createHttpInventoryRepository(baseUrl = '/api') {
         }
     };
 }
-

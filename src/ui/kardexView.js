@@ -53,6 +53,7 @@ export function triggerCsvDownload(filename, csvContent) {
  */
 export function createKardexView(doc = document) {
     const elements = {
+        movementFormCard: doc.getElementById('movement-form-card'),
         movementForm: doc.getElementById('movement-form'),
         movementProduct: doc.getElementById('movement-product'),
         movementType: doc.getElementById('movement-type'),
@@ -122,6 +123,7 @@ export function createKardexView(doc = document) {
 
         const reasonCell = createTextCell(movement.reason);
         const referenceCell = createTextCell(movement.reference || '—', 'cell-muted');
+        const userCell = createTextCell(movement.actorUsername || 'sistema', 'cell-muted');
 
         row.append(
             dateCell,
@@ -131,7 +133,8 @@ export function createKardexView(doc = document) {
             deltaCell,
             stockTransitionCell,
             reasonCell,
-            referenceCell
+            referenceCell,
+            userCell
         );
 
         return row;
@@ -140,7 +143,7 @@ export function createKardexView(doc = document) {
     function buildEmptyRow() {
         const row = doc.createElement('tr');
         const cell = doc.createElement('td');
-        cell.colSpan = 8;
+        cell.colSpan = 9;
         cell.className = 'empty-state';
         cell.textContent = 'Todavía no hay movimientos registrados para los filtros seleccionados.';
         row.appendChild(cell);
@@ -149,6 +152,12 @@ export function createKardexView(doc = document) {
 
     return {
         elements,
+
+        applyPermissions({ canWrite }) {
+            if (elements.movementFormCard) {
+                elements.movementFormCard.hidden = !canWrite;
+            }
+        },
 
         syncMovementTypeUI() {
             const isAdjustment = elements.movementType.value === 'ADJUSTMENT';

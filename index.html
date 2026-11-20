@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ERP - Gestión de Inventario</title>
+    <title>ERP - Gestión Empresarial</title>
     <link rel="stylesheet" href="styles.css">
 </head>
 
@@ -12,272 +12,785 @@
 
     <header>
         <div class="header-inner">
-            <h1>ERP - Gestión de Inventario</h1>
-            <p class="header-subtitle">Módulo de Inventario · SQLite Local + Kardex</p>
+            <div>
+                <h1>ERP - Gestión Empresarial</h1>
+                <p class="header-subtitle">Inventario · Compras · Ventas · Ingesta IA · Kardex · RBAC</p>
+            </div>
+            <div id="session-bar" class="session-bar" hidden>
+                <span id="session-user-name" class="session-user-name"></span>
+                <span id="session-user-role" class="badge role-badge"></span>
+                <button type="button" id="logout-btn" class="btn-secondary btn-compact">Cerrar sesión</button>
+            </div>
         </div>
     </header>
 
     <main>
-        <section aria-labelledby="kpi-heading">
-            <h2 id="kpi-heading">Resumen ejecutivo</h2>
-            <dl class="kpi-grid">
-                <div class="kpi-card">
-                    <dt>SKUs activos</dt>
-                    <dd id="kpi-total-skus">0</dd>
-                </div>
-                <div class="kpi-card">
-                    <dt>Unidades totales</dt>
-                    <dd id="kpi-total-units">0</dd>
-                </div>
-                <div class="kpi-card" id="kpi-low-stock-card">
-                    <dt>Stock crítico</dt>
-                    <dd id="kpi-low-stock">0</dd>
-                </div>
-                <div class="kpi-card">
-                    <dt>Capital inmovilizado</dt>
-                    <dd id="kpi-total-value">$ 0,00</dd>
-                </div>
-            </dl>
-        </section>
+        <section id="auth-screen" class="auth-card" aria-labelledby="auth-heading">
+            <h2 id="auth-heading">Iniciar sesión</h2>
+            <p id="auth-subtitle" class="auth-subtitle">Verificando estado del sistema...</p>
+            <p id="auth-error-msg" role="alert"></p>
 
-        <section aria-labelledby="form-heading">
-            <h2 id="form-heading">Alta de producto</h2>
-            <p id="error-msg" role="alert"></p>
-            <p id="status-msg" role="status" aria-live="polite"></p>
-
-            <form id="product-form" novalidate>
-                <div>
-                    <label for="product-sku">SKU:</label>
-                    <input type="text" id="product-sku" name="product_sku" placeholder="Ej. TEC-001"
-                        maxlength="32" autocomplete="off" required>
+            <form id="auth-form" class="auth-form" novalidate>
+                <div id="auth-fullname-group" hidden>
+                    <label for="auth-fullname">Nombre completo:</label>
+                    <input type="text" id="auth-fullname" name="auth_fullname" autocomplete="name"
+                        placeholder="Ej. Pablo Ruiz" maxlength="80">
                 </div>
 
                 <div>
-                    <label for="product-name">Producto:</label>
-                    <input type="text" id="product-name" name="product_name" placeholder="Ej. Teclado Mecánico"
-                        maxlength="120" required>
+                    <label for="auth-username">Usuario:</label>
+                    <input type="text" id="auth-username" name="auth_username" autocomplete="username"
+                        placeholder="Ej. admin" maxlength="32" required>
                 </div>
 
                 <div>
-                    <label for="product-category">Categoría:</label>
-                    <input type="text" id="product-category" name="product_category" list="category-suggestions"
-                        placeholder="Ej. Periféricos" maxlength="60">
-                    <datalist id="category-suggestions"></datalist>
-                </div>
-
-                <div>
-                    <label for="product-unit-price">Precio unitario:</label>
-                    <input type="number" id="product-unit-price" name="product_unit_price" placeholder="0.00"
-                        step="0.01" min="0" required>
-                </div>
-
-                <div>
-                    <label for="product-stock">Stock actual:</label>
-                    <input type="number" id="product-stock" name="product_stock" placeholder="0" min="0" step="1"
-                        required>
-                </div>
-
-                <div>
-                    <label for="product-min-stock">Stock mínimo:</label>
-                    <input type="number" id="product-min-stock" name="product_min_stock" value="5" min="0" step="1"
-                        required>
+                    <label for="auth-password">Contraseña:</label>
+                    <input type="password" id="auth-password" name="auth_password" autocomplete="current-password"
+                        placeholder="Mínimo 8 caracteres" maxlength="128" required>
                 </div>
 
                 <div class="form-actions">
-                    <button type="submit" id="submit-btn">Agregar producto</button>
-                    <button type="button" id="cancel-edit-btn" class="btn-secondary" hidden>Cancelar edición</button>
+                    <button type="submit" id="auth-submit-btn">Ingresar al sistema</button>
                 </div>
             </form>
         </section>
 
-        <section aria-labelledby="list-heading">
-            <div class="section-header">
-                <h2 id="list-heading">Listado de inventario</h2>
-                <div class="section-header-actions">
-                    <p id="list-count" class="list-count">Mostrando 0 de 0 productos</p>
-                    <button type="button" id="export-products-csv-btn" class="btn-secondary btn-compact">
-                        Exportar CSV
-                    </button>
-                </div>
-            </div>
+        <div id="app-shell" class="app-shell" hidden>
+            <nav id="module-nav" class="module-tabs" role="tablist" aria-label="Módulos del ERP">
+                <button type="button" role="tab" class="tab-btn is-active" data-tab="inventory" id="tab-inventory"
+                    aria-selected="true" aria-controls="panel-inventory">Inventario</button>
+                <button type="button" role="tab" class="tab-btn" data-tab="purchases" id="tab-purchases"
+                    aria-selected="false" aria-controls="panel-purchases">Compras</button>
+                <button type="button" role="tab" class="tab-btn" data-tab="sales" id="tab-sales"
+                    aria-selected="false" aria-controls="panel-sales">Ventas</button>
+                <button type="button" role="tab" class="tab-btn" data-tab="intake" id="tab-intake"
+                    aria-selected="false" aria-controls="panel-intake">Ingesta IA</button>
+                <button type="button" role="tab" class="tab-btn" data-tab="kardex" id="tab-kardex"
+                    aria-selected="false" aria-controls="panel-kardex">Kardex</button>
+                <button type="button" role="tab" class="tab-btn" data-tab="users" id="tab-users"
+                    aria-selected="false" aria-controls="panel-users" hidden>Usuarios</button>
+            </nav>
 
-            <div class="toolbar" role="search" aria-label="Filtros del inventario">
-                <div class="toolbar-field toolbar-search">
-                    <label for="search-input">Buscar (SKU, nombre o categoría):</label>
-                    <input type="search" id="search-input" name="search_query"
-                        placeholder="Ej. TEC-001 o Teclado">
-                </div>
+            <div id="panel-inventory" class="tab-panel" role="tabpanel" aria-labelledby="tab-inventory">
+                <section aria-labelledby="kpi-heading">
+                    <h2 id="kpi-heading">Resumen ejecutivo</h2>
+                    <dl class="kpi-grid">
+                        <div class="kpi-card">
+                            <dt>SKUs activos</dt>
+                            <dd id="kpi-total-skus">0</dd>
+                        </div>
+                        <div class="kpi-card">
+                            <dt>Unidades totales</dt>
+                            <dd id="kpi-total-units">0</dd>
+                        </div>
+                        <div class="kpi-card" id="kpi-low-stock-card">
+                            <dt>Stock crítico</dt>
+                            <dd id="kpi-low-stock">0</dd>
+                        </div>
+                        <div class="kpi-card">
+                            <dt>Capital inmovilizado</dt>
+                            <dd id="kpi-total-value">$ 0,00</dd>
+                        </div>
+                    </dl>
+                </section>
 
-                <div class="toolbar-field">
-                    <label for="category-filter">Categoría:</label>
-                    <select id="category-filter" name="category_filter">
-                        <option value="all">Todas las categorías</option>
-                    </select>
-                </div>
+                <section id="product-form-section" aria-labelledby="form-heading">
+                    <h2 id="form-heading">Alta de producto</h2>
+                    <p id="error-msg" role="alert"></p>
+                    <p id="status-msg" role="status" aria-live="polite"></p>
 
-                <div class="toolbar-field">
-                    <label for="stock-filter">Estado de stock:</label>
-                    <select id="stock-filter" name="stock_filter">
-                        <option value="all">Todos los estados</option>
-                        <option value="low">Stock crítico (bajo / sin stock)</option>
-                        <option value="out">Sin stock</option>
-                        <option value="ok">Stock normal</option>
-                    </select>
-                </div>
+                    <form id="product-form" novalidate>
+                        <div>
+                            <label for="product-sku">SKU:</label>
+                            <input type="text" id="product-sku" name="product_sku" placeholder="Ej. TEC-001"
+                                maxlength="32" autocomplete="off" required>
+                        </div>
 
-                <div class="toolbar-field">
-                    <label for="sort-select">Ordenar por:</label>
-                    <select id="sort-select" name="sort_by">
-                        <option value="createdAt-desc">Más recientes</option>
-                        <option value="name-asc">Nombre (A-Z)</option>
-                        <option value="price-asc">Precio (menor a mayor)</option>
-                        <option value="price-desc">Precio (mayor a menor)</option>
-                        <option value="stock-asc">Stock (menor a mayor)</option>
-                        <option value="stock-desc">Stock (mayor a menor)</option>
-                        <option value="value-desc">Valor total (mayor a menor)</option>
-                    </select>
-                </div>
-            </div>
+                        <div>
+                            <label for="product-name">Producto:</label>
+                            <input type="text" id="product-name" name="product_name" placeholder="Ej. Teclado Mecánico"
+                                maxlength="120" required>
+                        </div>
 
-            <div class="table-wrapper">
-                <table>
-                    <thead>
-                        <tr>
-                            <th scope="col">SKU</th>
-                            <th scope="col">Producto</th>
-                            <th scope="col">Categoría</th>
-                            <th scope="col">Precio</th>
-                            <th scope="col">Stock</th>
-                            <th scope="col">Estado</th>
-                            <th scope="col">Valor total</th>
-                            <th scope="col">Acciones</th>
-                        </tr>
-                    </thead>
-                    <tbody id="table-body"></tbody>
-                    <tfoot>
-                        <tr>
-                            <th scope="row" colspan="6">Valor total listado:</th>
-                            <td id="inventory-total"></td>
-                            <td aria-hidden="true"></td>
-                        </tr>
-                    </tfoot>
-                </table>
-            </div>
-        </section>
+                        <div>
+                            <label for="product-category">Categoría:</label>
+                            <input type="text" id="product-category" name="product_category" list="category-suggestions"
+                                placeholder="Ej. Periféricos" maxlength="60">
+                            <datalist id="category-suggestions"></datalist>
+                        </div>
 
-        <section aria-labelledby="kardex-heading">
-            <div class="section-header">
-                <h2 id="kardex-heading">Kardex de movimientos de stock</h2>
-                <div class="section-header-actions">
-                    <p id="kardex-count" class="list-count">Mostrando 0 movimientos</p>
-                    <button type="button" id="export-kardex-csv-btn" class="btn-secondary btn-compact">
-                        Exportar Kardex CSV
-                    </button>
-                </div>
-            </div>
+                        <div>
+                            <label for="product-unit-price">Precio unitario:</label>
+                            <input type="number" id="product-unit-price" name="product_unit_price" placeholder="0.00"
+                                step="0.01" min="0" required>
+                        </div>
 
-            <p id="movement-error-msg" role="alert"></p>
-            <p id="movement-status-msg" role="status" aria-live="polite"></p>
+                        <div>
+                            <label for="product-stock">Stock actual:</label>
+                            <input type="number" id="product-stock" name="product_stock" placeholder="0" min="0" step="1"
+                                required>
+                        </div>
 
-            <form id="movement-form" class="movement-form" novalidate>
-                <div>
-                    <label for="movement-product">Producto:</label>
-                    <select id="movement-product" name="movement_product" required>
-                        <option value="">Cargá un producto primero...</option>
-                    </select>
-                </div>
+                        <div>
+                            <label for="product-min-stock">Stock mínimo:</label>
+                            <input type="number" id="product-min-stock" name="product_min_stock" value="5" min="0"
+                                step="1" required>
+                        </div>
 
-                <div>
-                    <label for="movement-type">Tipo de movimiento:</label>
-                    <select id="movement-type" name="movement_type" required>
-                        <option value="IN">Entrada (compra / ingreso)</option>
-                        <option value="OUT">Salida (venta / despacho)</option>
-                        <option value="ADJUSTMENT">Ajuste de inventario (stock real)</option>
-                    </select>
-                </div>
+                        <div class="form-actions">
+                            <button type="submit" id="submit-btn">Agregar producto</button>
+                            <button type="button" id="cancel-edit-btn" class="btn-secondary" hidden>
+                                Cancelar edición
+                            </button>
+                        </div>
+                    </form>
+                </section>
 
-                <div>
-                    <label for="movement-quantity" id="movement-quantity-label">Cantidad:</label>
-                    <input type="number" id="movement-quantity" name="movement_quantity" value="1" min="1" step="1"
-                        required>
-                </div>
-
-                <div>
-                    <label for="movement-reason">Motivo:</label>
-                    <input type="text" id="movement-reason" name="movement_reason"
-                        list="movement-reason-suggestions" placeholder="Ej. Venta mostrador" maxlength="200" required>
-                    <datalist id="movement-reason-suggestions">
-                        <option value="Compra a proveedor"></option>
-                        <option value="Venta a cliente"></option>
-                        <option value="Devolución de cliente"></option>
-                        <option value="Conteo físico de inventario"></option>
-                        <option value="Merma o rotura"></option>
-                    </datalist>
-                </div>
-
-                <div>
-                    <label for="movement-reference">Comprobante / Referencia:</label>
-                    <input type="text" id="movement-reference" name="movement_reference"
-                        placeholder="Ej. FC-A 0001-0042" maxlength="60">
-                </div>
-
-                <div class="form-actions">
-                    <button type="submit">Registrar movimiento</button>
-                </div>
-            </form>
-
-            <div class="kardex-toolbar">
-                <div class="kardex-summary">
-                    <span id="kardex-summary-in" class="summary-pill summary-pill-in">Entradas: +0</span>
-                    <span id="kardex-summary-out" class="summary-pill summary-pill-out">Salidas: -0</span>
-                </div>
-
-                <div class="kardex-filters">
-                    <div class="toolbar-field">
-                        <label for="kardex-product-filter">Filtrar por producto:</label>
-                        <select id="kardex-product-filter" name="kardex_product_filter">
-                            <option value="">Todos los productos</option>
-                        </select>
+                <section aria-labelledby="list-heading">
+                    <div class="section-header">
+                        <h2 id="list-heading">Listado de inventario</h2>
+                        <div class="section-header-actions">
+                            <p id="list-count" class="list-count">Mostrando 0 de 0 productos</p>
+                            <button type="button" id="export-products-csv-btn" class="btn-secondary btn-compact">
+                                Exportar CSV
+                            </button>
+                        </div>
                     </div>
 
-                    <div class="toolbar-field">
-                        <label for="kardex-type-filter">Tipo:</label>
-                        <select id="kardex-type-filter" name="kardex_type_filter">
-                            <option value="all">Todos los tipos</option>
-                            <option value="IN">Entradas</option>
-                            <option value="OUT">Salidas</option>
-                            <option value="ADJUSTMENT">Ajustes</option>
-                        </select>
+                    <div class="toolbar" role="search" aria-label="Filtros del inventario">
+                        <div class="toolbar-field toolbar-search">
+                            <label for="search-input">Buscar (SKU, nombre o categoría):</label>
+                            <input type="search" id="search-input" name="search_query"
+                                placeholder="Ej. TEC-001 o Teclado">
+                        </div>
+
+                        <div class="toolbar-field">
+                            <label for="category-filter">Categoría:</label>
+                            <select id="category-filter" name="category_filter">
+                                <option value="all">Todas las categorías</option>
+                            </select>
+                        </div>
+
+                        <div class="toolbar-field">
+                            <label for="stock-filter">Estado de stock:</label>
+                            <select id="stock-filter" name="stock_filter">
+                                <option value="all">Todos los estados</option>
+                                <option value="low">Stock crítico (bajo / sin stock)</option>
+                                <option value="out">Sin stock</option>
+                                <option value="ok">Stock normal</option>
+                            </select>
+                        </div>
+
+                        <div class="toolbar-field">
+                            <label for="sort-select">Ordenar por:</label>
+                            <select id="sort-select" name="sort_by">
+                                <option value="createdAt-desc">Más recientes</option>
+                                <option value="name-asc">Nombre (A-Z)</option>
+                                <option value="price-asc">Precio (menor a mayor)</option>
+                                <option value="price-desc">Precio (mayor a menor)</option>
+                                <option value="stock-asc">Stock (menor a mayor)</option>
+                                <option value="stock-desc">Stock (mayor a menor)</option>
+                                <option value="value-desc">Valor total (mayor a menor)</option>
+                            </select>
+                        </div>
                     </div>
-                </div>
+
+                    <div class="table-wrapper">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th scope="col">SKU</th>
+                                    <th scope="col">Producto</th>
+                                    <th scope="col">Categoría</th>
+                                    <th scope="col">Precio</th>
+                                    <th scope="col">Stock</th>
+                                    <th scope="col">Estado</th>
+                                    <th scope="col">Valor total</th>
+                                    <th scope="col">Acciones</th>
+                                </tr>
+                            </thead>
+                            <tbody id="table-body"></tbody>
+                            <tfoot>
+                                <tr>
+                                    <th scope="row" colspan="6">Valor total listado:</th>
+                                    <td id="inventory-total"></td>
+                                    <td aria-hidden="true"></td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+                </section>
             </div>
 
-            <div class="table-wrapper">
-                <table>
-                    <thead>
-                        <tr>
-                            <th scope="col">Fecha</th>
-                            <th scope="col">SKU</th>
-                            <th scope="col">Producto</th>
-                            <th scope="col">Tipo</th>
-                            <th scope="col">Variación</th>
-                            <th scope="col">Stock</th>
-                            <th scope="col">Motivo</th>
-                            <th scope="col">Referencia</th>
-                        </tr>
-                    </thead>
-                    <tbody id="kardex-table-body"></tbody>
-                </table>
+            <div id="panel-purchases" class="tab-panel" role="tabpanel" aria-labelledby="tab-purchases" hidden>
+                <section id="supplier-form-card" aria-labelledby="supplier-heading">
+                    <h2 id="supplier-heading">Nuevo proveedor</h2>
+                    <p id="supplier-error-msg" role="alert"></p>
+                    <p id="supplier-status-msg" role="status" aria-live="polite"></p>
+
+                    <form id="supplier-form" novalidate>
+                        <div>
+                            <label for="supplier-name">Razón social / Nombre:</label>
+                            <input type="text" id="supplier-name" name="supplier_name"
+                                placeholder="Ej. TechMayorista S.A." maxlength="120" required>
+                        </div>
+                        <div>
+                            <label for="supplier-tax-id">CUIT / ID Fiscal:</label>
+                            <input type="text" id="supplier-tax-id" name="supplier_tax_id"
+                                placeholder="Ej. 30-71122334-9" maxlength="30">
+                        </div>
+                        <div>
+                            <label for="supplier-email">Correo:</label>
+                            <input type="email" id="supplier-email" name="supplier_email"
+                                placeholder="ventas@proveedor.com" maxlength="120">
+                        </div>
+                        <div>
+                            <label for="supplier-phone">Teléfono:</label>
+                            <input type="text" id="supplier-phone" name="supplier_phone" placeholder="+54 11 4000-0000"
+                                maxlength="40">
+                        </div>
+                        <div class="form-actions">
+                            <button type="submit">Guardar proveedor</button>
+                        </div>
+                    </form>
+                </section>
+
+                <section id="purchase-form-card" aria-labelledby="purchase-form-heading">
+                    <h2 id="purchase-form-heading">Nueva orden de compra</h2>
+                    <p id="purchase-error-msg" role="alert"></p>
+                    <p id="purchase-status-msg" role="status" aria-live="polite"></p>
+
+                    <form id="purchase-form" novalidate>
+                        <div>
+                            <label for="purchase-supplier">Proveedor:</label>
+                            <select id="purchase-supplier" name="purchase_supplier" required>
+                                <option value="">Agregá un proveedor primero...</option>
+                            </select>
+                        </div>
+
+                        <div>
+                            <label for="purchase-notes">Observaciones:</label>
+                            <input type="text" id="purchase-notes" name="purchase_notes"
+                                placeholder="Ej. Remito 0001-00084" maxlength="300">
+                        </div>
+
+                        <div class="checkbox-field">
+                            <label class="checkbox-label" for="purchase-receive-now">
+                                <input type="checkbox" id="purchase-receive-now" name="purchase_receive_now" checked>
+                                Recibir mercadería inmediatamente (impactar stock + Kardex)
+                            </label>
+                        </div>
+
+                        <div class="order-lines-section">
+                            <div class="order-lines-header">
+                                <span>Ítems de la orden</span>
+                                <button type="button" id="add-purchase-line-btn" class="btn-secondary btn-compact">
+                                    + Agregar ítem
+                                </button>
+                            </div>
+                            <div id="purchase-lines" class="order-lines"></div>
+                            <div class="order-total-bar">
+                                Total de la orden: <strong id="purchase-live-total">$ 0,00</strong>
+                            </div>
+                        </div>
+
+                        <div class="form-actions">
+                            <button type="submit">Registrar orden de compra</button>
+                        </div>
+                    </form>
+                </section>
+
+                <section aria-labelledby="purchases-list-heading">
+                    <div class="section-header">
+                        <h2 id="purchases-list-heading">Órdenes de compra</h2>
+                        <p id="purchases-summary" class="list-count">Recibidas: 0 · Borradores: 0</p>
+                    </div>
+
+                    <div class="table-wrapper">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th scope="col">N° Orden</th>
+                                    <th scope="col">Fecha</th>
+                                    <th scope="col">Proveedor</th>
+                                    <th scope="col">Detalle</th>
+                                    <th scope="col">Estado</th>
+                                    <th scope="col">Total</th>
+                                    <th scope="col">Usuario</th>
+                                    <th scope="col">Acciones</th>
+                                </tr>
+                            </thead>
+                            <tbody id="purchases-table-body"></tbody>
+                        </table>
+                    </div>
+                </section>
             </div>
-        </section>
+
+            <div id="panel-sales" class="tab-panel" role="tabpanel" aria-labelledby="tab-sales" hidden>
+                <section id="customer-form-card" aria-labelledby="customer-heading">
+                    <h2 id="customer-heading">Nuevo cliente</h2>
+                    <p id="customer-error-msg" role="alert"></p>
+                    <p id="customer-status-msg" role="status" aria-live="polite"></p>
+
+                    <form id="customer-form" novalidate>
+                        <div>
+                            <label for="customer-name">Nombre / Razón social:</label>
+                            <input type="text" id="customer-name" name="customer_name"
+                                placeholder="Ej. Estudio Norte SRL" maxlength="120" required>
+                        </div>
+                        <div>
+                            <label for="customer-tax-id">CUIT / DNI:</label>
+                            <input type="text" id="customer-tax-id" name="customer_tax_id"
+                                placeholder="Ej. 20-34567890-1" maxlength="30">
+                        </div>
+                        <div>
+                            <label for="customer-email">Correo:</label>
+                            <input type="email" id="customer-email" name="customer_email"
+                                placeholder="compras@cliente.com" maxlength="120">
+                        </div>
+                        <div>
+                            <label for="customer-phone">Teléfono:</label>
+                            <input type="text" id="customer-phone" name="customer_phone" placeholder="+54 11 5000-0000"
+                                maxlength="40">
+                        </div>
+                        <div class="form-actions">
+                            <button type="submit">Guardar cliente</button>
+                        </div>
+                    </form>
+                </section>
+
+                <section id="sale-form-card" aria-labelledby="sale-form-heading">
+                    <h2 id="sale-form-heading">Registrar venta</h2>
+                    <p id="sale-error-msg" role="alert"></p>
+                    <p id="sale-status-msg" role="status" aria-live="polite"></p>
+
+                    <form id="sale-form" novalidate>
+                        <div>
+                            <label for="sale-customer">Cliente:</label>
+                            <select id="sale-customer" name="sale_customer">
+                                <option value="">Consumidor Final (sin cliente)</option>
+                            </select>
+                        </div>
+
+                        <div>
+                            <label for="sale-notes">Observaciones / Comprobante:</label>
+                            <input type="text" id="sale-notes" name="sale_notes" placeholder="Ej. FC-B 0001-0120"
+                                maxlength="300">
+                        </div>
+
+                        <div class="order-lines-section">
+                            <div class="order-lines-header">
+                                <span>Ítems de la venta (precio tomado del catálogo)</span>
+                                <button type="button" id="add-sale-line-btn" class="btn-secondary btn-compact">
+                                    + Agregar ítem
+                                </button>
+                            </div>
+                            <div id="sale-lines" class="order-lines"></div>
+                            <div class="order-total-bar">
+                                Total de la venta: <strong id="sale-live-total">$ 0,00</strong>
+                            </div>
+                        </div>
+
+                        <div class="form-actions">
+                            <button type="submit">Confirmar venta</button>
+                        </div>
+                    </form>
+                </section>
+
+                <section aria-labelledby="sales-list-heading">
+                    <div class="section-header">
+                        <h2 id="sales-list-heading">Historial de ventas</h2>
+                        <p id="sales-summary" class="list-count">Confirmadas: 0 · Anuladas: 0</p>
+                    </div>
+
+                    <div class="table-wrapper">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th scope="col">N° Venta</th>
+                                    <th scope="col">Fecha</th>
+                                    <th scope="col">Cliente</th>
+                                    <th scope="col">Detalle</th>
+                                    <th scope="col">Estado</th>
+                                    <th scope="col">Total</th>
+                                    <th scope="col">Usuario</th>
+                                    <th scope="col">Acciones</th>
+                                </tr>
+                            </thead>
+                            <tbody id="sales-table-body"></tbody>
+                        </table>
+                    </div>
+                </section>
+            </div>
+
+            <div id="panel-intake" class="tab-panel" role="tabpanel" aria-labelledby="tab-intake" hidden>
+                <section id="intake-upload-card" aria-labelledby="intake-upload-heading">
+                    <div class="section-header">
+                        <h2 id="intake-upload-heading">Ingesta inteligente de comprobantes (Gemini AI)</h2>
+                        <div class="ai-status-controls">
+                            <span id="ai-status-pill" class="summary-pill summary-pill-out">Verificando IA...</span>
+                            <button type="button" id="refresh-ai-models-btn" class="btn-secondary btn-compact" hidden>
+                                Detectar modelos
+                            </button>
+                        </div>
+                    </div>
+
+                    <div id="ai-models-bar" class="ai-models-bar" aria-live="polite" hidden></div>
+
+                    <p id="intake-error-msg" role="alert"></p>
+                    <p id="intake-status-msg" role="status" aria-live="polite"></p>
+
+                    <form id="intake-upload-form" novalidate>
+                        <div>
+                            <label for="intake-doc-type">Tipo de comprobante por defecto:</label>
+                            <select id="intake-doc-type" name="intake_doc_type">
+                                <option value="PURCHASE" selected>Compra (Factura / Remito de proveedor)</option>
+                                <option value="SALE">Venta (Pedido / Factura a cliente)</option>
+                            </select>
+                        </div>
+
+                        <div class="intake-dropzone-wrap">
+                            <label for="intake-file-input">Archivos por lote (PDF, imágenes o TXT):</label>
+                            <div id="intake-dropzone" class="intake-dropzone">
+                                <input type="file" id="intake-file-input" name="intake_files" multiple
+                                    accept=".pdf,.png,.jpg,.jpeg,.webp,.txt,application/pdf,image/png,image/jpeg,image/webp,text/plain">
+                                <p id="intake-files-summary" class="intake-files-summary">
+                                    Podés arrastrar o seleccionar múltiples archivos (PDF, JPG, PNG, WebP o TXT · máx. 25 por lote).
+                                </p>
+                            </div>
+                        </div>
+
+                        <div class="intake-paste-wrap">
+                            <label for="intake-paste-text">O pegá el texto de un remito / pedido / WhatsApp:</label>
+                            <textarea id="intake-paste-text" name="intake_paste_text" rows="3"
+                                placeholder="Ej. Proveedor TechMayorista CUIT 30-71122334-9 · 10x TEC-001 Teclado Mecánico $ 25000 c/u"></textarea>
+                        </div>
+
+                        <div class="form-actions">
+                            <button type="submit" id="intake-upload-btn">Analizar comprobantes con Gemini</button>
+                        </div>
+                    </form>
+                </section>
+
+                <section id="intake-review-card" aria-labelledby="intake-review-title" hidden>
+                    <div class="section-header">
+                        <h3 id="intake-review-title" class="review-title">Revisión previa</h3>
+                        <span id="intake-review-confidence" class="badge badge-adjust">Confianza: 0%</span>
+                    </div>
+
+                    <ul id="intake-review-warnings" class="intake-warnings" hidden></ul>
+                    <p id="intake-review-error-msg" role="alert"></p>
+
+                    <form id="intake-review-form" novalidate>
+                        <div>
+                            <label for="review-doc-type">Tipo:</label>
+                            <select id="review-doc-type" name="review_doc_type">
+                                <option value="PURCHASE">Compra (Orden de Compra)</option>
+                                <option value="SALE">Venta</option>
+                            </select>
+                        </div>
+
+                        <div>
+                            <label for="review-doc-number">N° Comprobante:</label>
+                            <input type="text" id="review-doc-number" name="review_doc_number"
+                                placeholder="Ej. FC-A 0001-00001234" maxlength="60">
+                        </div>
+
+                        <div>
+                            <label for="review-issue-date">Fecha emitida:</label>
+                            <input type="text" id="review-issue-date" name="review_issue_date"
+                                placeholder="Ej. 2026-11-20" maxlength="30">
+                        </div>
+
+                        <div>
+                            <label for="review-party-select" id="review-party-label">Proveedor:</label>
+                            <select id="review-party-select" name="review_party_select"></select>
+                        </div>
+
+                        <div>
+                            <label for="review-notes">Observaciones:</label>
+                            <input type="text" id="review-notes" name="review_notes" maxlength="300">
+                        </div>
+
+                        <div id="review-receive-wrap" class="checkbox-field">
+                            <label class="checkbox-label" for="review-receive-now">
+                                <input type="checkbox" id="review-receive-now" name="review_receive_now" checked>
+                                Recibir mercadería inmediatamente al aprobar (impactar stock + Kardex)
+                            </label>
+                        </div>
+
+                        <div id="review-new-party-fields" class="intake-new-party-fields" hidden>
+                            <div>
+                                <label for="review-party-name">Nombre / Razón social nueva:</label>
+                                <input type="text" id="review-party-name" maxlength="120">
+                            </div>
+                            <div>
+                                <label for="review-party-tax-id">CUIT / DNI:</label>
+                                <input type="text" id="review-party-tax-id" maxlength="30">
+                            </div>
+                            <div>
+                                <label for="review-party-email">Correo:</label>
+                                <input type="email" id="review-party-email" maxlength="120">
+                            </div>
+                            <div>
+                                <label for="review-party-phone">Teléfono:</label>
+                                <input type="text" id="review-party-phone" maxlength="40">
+                            </div>
+                        </div>
+
+                        <div class="order-lines-section">
+                            <div class="order-lines-header">
+                                <span>Ítems extraídos (verificá SKU, cantidad y monto)</span>
+                                <button type="button" id="review-add-item-btn" class="btn-secondary btn-compact">
+                                    + Agregar línea
+                                </button>
+                            </div>
+                            <div id="review-items-list" class="intake-lines-list"></div>
+                            <div class="order-total-bar">
+                                Total calculado: <strong id="review-live-total">$ 0,00</strong>
+                            </div>
+                        </div>
+
+                        <div class="form-actions">
+                            <button type="submit" id="review-save-btn" class="btn-secondary">Guardar revisión</button>
+                            <button type="button" id="review-approve-btn" class="btn-primary">
+                                Aprobar y cargar al ERP
+                            </button>
+                            <button type="button" id="review-reject-btn" class="btn-danger">Rechazar</button>
+                            <button type="button" id="review-close-btn" class="btn-secondary">Cerrar</button>
+                        </div>
+                    </form>
+                </section>
+
+                <section aria-labelledby="intake-queue-heading">
+                    <div class="section-header">
+                        <h2 id="intake-queue-heading">Bandeja de control previa</h2>
+                        <div class="section-header-actions">
+                            <select id="intake-status-filter" class="inline-select" aria-label="Filtrar por estado">
+                                <option value="all">Todos los estados</option>
+                                <option value="READY_FOR_REVIEW">Listas para revisar</option>
+                                <option value="PENDING">En cola</option>
+                                <option value="PROCESSING">Analizando IA</option>
+                                <option value="APPROVED">Aprobadas</option>
+                                <option value="ERROR">Con error</option>
+                                <option value="REJECTED">Rechazadas</option>
+                            </select>
+                            <button type="button" id="reject-errors-btn" class="btn-secondary btn-compact" disabled>
+                                Descartar con error
+                            </button>
+                            <button type="button" id="approve-all-ready-btn" class="btn-primary btn-compact" disabled>
+                                Aprobar todas las listas
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="intake-stats-bar">
+                        <span id="intake-stat-processing" class="summary-pill">En proceso: 0</span>
+                        <span id="intake-stat-ready" class="summary-pill summary-pill-warn">Listas p/ revisar: 0</span>
+                        <span id="intake-stat-approved" class="summary-pill summary-pill-in">Aprobadas: 0</span>
+                        <span id="intake-stat-error" class="summary-pill summary-pill-out">Con error: 0</span>
+                        <span id="intake-stat-duplicates" class="summary-pill">Duplicadas: 0</span>
+                    </div>
+
+                    <div class="table-wrapper">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th scope="col">Archivo</th>
+                                    <th scope="col">Tipo</th>
+                                    <th scope="col">Comprobante</th>
+                                    <th scope="col">Contraparte</th>
+                                    <th scope="col">Ítems</th>
+                                    <th scope="col">Total</th>
+                                    <th scope="col">Estado</th>
+                                    <th scope="col">Acciones</th>
+                                </tr>
+                            </thead>
+                            <tbody id="intake-table-body"></tbody>
+                        </table>
+                    </div>
+                </section>
+            </div>
+
+            <div id="panel-kardex" class="tab-panel" role="tabpanel" aria-labelledby="tab-kardex" hidden>
+                <section aria-labelledby="kardex-heading">
+                    <div class="section-header">
+                        <h2 id="kardex-heading">Kardex de movimientos de stock</h2>
+                        <div class="section-header-actions">
+                            <p id="kardex-count" class="list-count">Mostrando 0 movimientos</p>
+                            <button type="button" id="export-kardex-csv-btn" class="btn-secondary btn-compact">
+                                Exportar Kardex CSV
+                            </button>
+                        </div>
+                    </div>
+
+                    <div id="movement-form-card">
+                        <p id="movement-error-msg" role="alert"></p>
+                        <p id="movement-status-msg" role="status" aria-live="polite"></p>
+
+                        <form id="movement-form" class="movement-form" novalidate>
+                            <div>
+                                <label for="movement-product">Producto:</label>
+                                <select id="movement-product" name="movement_product" required>
+                                    <option value="">Cargá un producto primero...</option>
+                                </select>
+                            </div>
+
+                            <div>
+                                <label for="movement-type">Tipo de movimiento:</label>
+                                <select id="movement-type" name="movement_type" required>
+                                    <option value="IN">Entrada (compra / ingreso)</option>
+                                    <option value="OUT">Salida (venta / despacho)</option>
+                                    <option value="ADJUSTMENT">Ajuste de inventario (stock real)</option>
+                                </select>
+                            </div>
+
+                            <div>
+                                <label for="movement-quantity" id="movement-quantity-label">Cantidad:</label>
+                                <input type="number" id="movement-quantity" name="movement_quantity" value="1" min="1"
+                                    step="1" required>
+                            </div>
+
+                            <div>
+                                <label for="movement-reason">Motivo:</label>
+                                <input type="text" id="movement-reason" name="movement_reason"
+                                    list="movement-reason-suggestions" placeholder="Ej. Venta mostrador" maxlength="200"
+                                    required>
+                                <datalist id="movement-reason-suggestions">
+                                    <option value="Compra a proveedor"></option>
+                                    <option value="Venta a cliente"></option>
+                                    <option value="Devolución de cliente"></option>
+                                    <option value="Conteo físico de inventario"></option>
+                                    <option value="Merma o rotura"></option>
+                                </datalist>
+                            </div>
+
+                            <div>
+                                <label for="movement-reference">Comprobante / Referencia:</label>
+                                <input type="text" id="movement-reference" name="movement_reference"
+                                    placeholder="Ej. FC-A 0001-0042" maxlength="60">
+                            </div>
+
+                            <div class="form-actions">
+                                <button type="submit">Registrar movimiento</button>
+                            </div>
+                        </form>
+                    </div>
+
+                    <div class="kardex-toolbar">
+                        <div class="kardex-summary">
+                            <span id="kardex-summary-in" class="summary-pill summary-pill-in">Entradas: +0</span>
+                            <span id="kardex-summary-out" class="summary-pill summary-pill-out">Salidas: -0</span>
+                        </div>
+
+                        <div class="kardex-filters">
+                            <div class="toolbar-field">
+                                <label for="kardex-product-filter">Filtrar por producto:</label>
+                                <select id="kardex-product-filter" name="kardex_product_filter">
+                                    <option value="">Todos los productos</option>
+                                </select>
+                            </div>
+
+                            <div class="toolbar-field">
+                                <label for="kardex-type-filter">Tipo:</label>
+                                <select id="kardex-type-filter" name="kardex_type_filter">
+                                    <option value="all">Todos los tipos</option>
+                                    <option value="IN">Entradas</option>
+                                    <option value="OUT">Salidas</option>
+                                    <option value="ADJUSTMENT">Ajustes</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="table-wrapper">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th scope="col">Fecha</th>
+                                    <th scope="col">SKU</th>
+                                    <th scope="col">Producto</th>
+                                    <th scope="col">Tipo</th>
+                                    <th scope="col">Variación</th>
+                                    <th scope="col">Stock</th>
+                                    <th scope="col">Motivo</th>
+                                    <th scope="col">Referencia</th>
+                                    <th scope="col">Usuario</th>
+                                </tr>
+                            </thead>
+                            <tbody id="kardex-table-body"></tbody>
+                        </table>
+                    </div>
+                </section>
+            </div>
+
+            <div id="panel-users" class="tab-panel" role="tabpanel" aria-labelledby="tab-users" hidden>
+                <section aria-labelledby="user-create-heading">
+                    <h2 id="user-create-heading">Alta de usuario (RBAC)</h2>
+                    <p id="users-error-msg" role="alert"></p>
+                    <p id="users-status-msg" role="status" aria-live="polite"></p>
+
+                    <form id="user-form" novalidate>
+                        <div>
+                            <label for="user-username">Usuario:</label>
+                            <input type="text" id="user-username" name="user_username" placeholder="Ej. jperez"
+                                maxlength="32" autocomplete="off" required>
+                        </div>
+
+                        <div>
+                            <label for="user-fullname">Nombre completo:</label>
+                            <input type="text" id="user-fullname" name="user_fullname" placeholder="Ej. Juan Pérez"
+                                maxlength="80" required>
+                        </div>
+
+                        <div>
+                            <label for="user-role">Rol:</label>
+                            <select id="user-role" name="user_role">
+                                <option value="OPERATOR" selected>Operador</option>
+                                <option value="AUDITOR">Auditor (solo lectura)</option>
+                                <option value="ADMIN">Administrador</option>
+                            </select>
+                        </div>
+
+                        <div>
+                            <label for="user-password">Contraseña:</label>
+                            <input type="password" id="user-password" name="user_password"
+                                placeholder="Mínimo 8 caracteres" maxlength="128" autocomplete="new-password" required>
+                        </div>
+
+                        <div class="form-actions">
+                            <button type="submit">Crear usuario</button>
+                        </div>
+                    </form>
+                </section>
+
+                <section aria-labelledby="users-list-heading">
+                    <h2 id="users-list-heading">Usuarios registrados</h2>
+                    <div class="table-wrapper">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th scope="col">Usuario</th>
+                                    <th scope="col">Nombre</th>
+                                    <th scope="col">Rol</th>
+                                    <th scope="col">Estado</th>
+                                    <th scope="col">Acciones</th>
+                                </tr>
+                            </thead>
+                            <tbody id="users-table-body"></tbody>
+                        </table>
+                    </div>
+                </section>
+            </div>
+        </div>
     </main>
 
     <dialog id="confirm-dialog" aria-labelledby="confirm-dialog-title">
-        <h3 id="confirm-dialog-title">Confirmar eliminación</h3>
+        <h3 id="confirm-dialog-title">Confirmar acción</h3>
         <p id="confirm-dialog-message"></p>
         <div class="dialog-actions">
             <button type="button" id="confirm-cancel-btn" class="btn-secondary">Cancelar</button>
-            <button type="button" id="confirm-accept-btn" class="btn-danger">Eliminar producto</button>
+            <button type="button" id="confirm-accept-btn" class="btn-danger">Confirmar</button>
         </div>
     </dialog>
 
